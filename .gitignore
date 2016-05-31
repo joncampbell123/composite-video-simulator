@@ -11,4 +11,7 @@ Makefile
 Makefile.in
 install-sh
 stamp-h1
+depcomp
+INSTALL
+missing
 
