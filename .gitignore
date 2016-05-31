@@ -1,5 +1,10 @@
+ffmpeg_to_composite
+autom4te.cache
 aclocal.m4
 *~
+*.o
+*.a
+*.la
 compile
 config.h
 config.h.in
@@ -14,4 +19,5 @@ stamp-h1
 depcomp
 INSTALL
 missing
+COPYING
 
