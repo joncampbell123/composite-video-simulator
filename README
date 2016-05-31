@@ -1,0 +1,9 @@
+Analog composite video simulation (for retro video-like video production).
+
+The reason for this project is to provide the internet a better simulation
+of composite video-based emulation, especially for the rash of people on
+YouTube who all have their own ideas on what VHS artifacts looks like.
+
+This code uses FFMPEG 3.x to read and write video. It's written for Linux,
+but you could compile it (and FFMPEG) for Mac OS X as well if you tried.
+
