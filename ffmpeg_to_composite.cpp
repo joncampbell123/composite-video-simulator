@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <stdint.h>
+#include <assert.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -35,6 +36,9 @@ using namespace std;
 
 string		input_file;
 string		output_file;
+
+AVFormatContext*	input_avfmt = NULL;
+AVFormatContext*	output_avfmt = NULL;
 
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
@@ -131,6 +135,27 @@ int main(int argc,char **argv) {
 	avformat_network_init();
 	avcodec_register_all();
 
+	assert(input_avfmt == NULL);
+	if (avformat_open_input(&input_avfmt,input_file.c_str(),NULL,NULL) < 0) {
+		fprintf(stderr,"Failed to open input file\n");
+		return 1;
+	}
+
+	assert(output_avfmt == NULL);
+	if (avformat_alloc_output_context2(&output_avfmt,NULL,NULL,output_file.c_str()) < 0) {
+		fprintf(stderr,"Failed to open output file\n");
+		return 1;
+	}
+
+	if (avformat_write_header(output_avfmt,NULL) < 0) {
+		fprintf(stderr,"Failed to write header\n");
+		return 1;
+	}
+
+	av_write_trailer(output_avfmt);
+	avformat_free_context(output_avfmt);
+	av_free(output_avfmt);
+	avformat_close_input(&input_avfmt);
 	return 0;
 }
 
