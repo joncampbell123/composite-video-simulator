@@ -35,6 +35,7 @@ extern "C" {
 using namespace std;
 
 #include <string>
+#include <vector>
 
 string		input_file;
 string		output_file;
@@ -97,6 +98,93 @@ public:
 	double			prev;
 	double			tau;
 };
+
+class HiLoPair {
+public:
+	LowpassFilter		hi,lo;	// highpass, lowpass
+public:
+	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
+		lo.setFilter(rate,low_hz);
+		hi.setFilter(rate,high_hz);
+	}
+	double filter(const double sample) {
+		return hi.highpass(lo.lowpass(sample)); /* first lowpass, then highpass */
+	}
+};
+
+class HiLoPass : public vector<HiLoPair> { // all passes, one sample of one channel
+public:
+	HiLoPass() : vector() { }
+public:
+	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
+		for (size_t i=0;i < size();i++) (*this)[i].setFilter(rate,low_hz,high_hz);
+	}
+	double filter(double sample) {
+		for (size_t i=0;i < size();i++) sample = (*this)[i].lo.lowpass(sample);
+		for (size_t i=0;i < size();i++) sample = (*this)[i].hi.highpass(sample);
+		return sample;
+	}
+};
+
+class HiLoSample : public vector<HiLoPass> { // all passes, all channels of one sample period
+public:
+	HiLoSample() : vector() { }
+public:
+	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
+		for (size_t i=0;i < size();i++) (*this)[i].setFilter(rate,low_hz,high_hz);
+	}
+};
+
+class HiLoComboPass {
+public:
+	HiLoComboPass() : passes(0), channels(0), rate(0), low_cutoff(0), high_cutoff(0) {
+	}
+	~HiLoComboPass() {
+		clear();
+	}
+	void setChannels(const size_t _channels) {
+		if (channels != _channels) {
+			clear();
+			channels = _channels;
+		}
+	}
+	void setCutoff(const double _low_cutoff,const double _high_cutoff) {
+		if (low_cutoff != _low_cutoff || high_cutoff != _high_cutoff) {
+			clear();
+			low_cutoff = _low_cutoff;
+			high_cutoff = _high_cutoff;
+		}
+	}
+	void setRate(const double _rate) {
+		if (rate != _rate) {
+			clear();
+			rate = _rate;
+		}
+	}
+	void setPasses(const size_t _passes) {
+		if (passes != _passes) {
+			clear();
+			passes = _passes;
+		}
+	}
+	void clear() {
+		audiostate.clear();
+	}
+	void init() {
+		clear();
+		if (channels == 0 || passes == 0 || rate == 0 || low_cutoff == 0 || high_cutoff) return;
+		audiostate.setFilter(rate,low_cutoff,high_cutoff);
+	}
+public:
+	double		rate;
+	size_t		passes;
+	size_t		channels;
+	double		low_cutoff;
+	double		high_cutoff;
+	HiLoSample	audiostate;
+};
+
+HiLoComboPass		audio_hilopass;
 
 AVFormatContext*	input_avfmt = NULL;
 AVStream*		input_avstream_audio = NULL;	// do not free
@@ -374,6 +462,14 @@ int main(int argc,char **argv) {
 		return 1;
 	}
 
+	/* prepare audio filtering */
+	audio_hilopass.setChannels(output_audio_channels);
+	audio_hilopass.setRate(output_audio_rate);
+	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass);
+	audio_hilopass.setPasses(3);
+	audio_hilopass.init();
+
+	audio_hilopass.clear();
 	av_write_trailer(output_avfmt);
 	if (input_avstream_audio_resampler != NULL)
 		swr_free(&input_avstream_audio_resampler);
