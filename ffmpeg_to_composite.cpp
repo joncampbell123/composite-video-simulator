@@ -319,8 +319,8 @@ static int parse_argv(int argc,char **argv) {
 				else if (!strcmp(a,"lp")) {
 					output_vhs_tape_speed = VHS_LP;
 				}
-				else if (!strcmp(a,"ep")) {
-					output_vhs_tape_speed = VHS_EP;
+				else if (!strcmp(a,"sp")) {
+					output_vhs_tape_speed = VHS_SP;
 				}
 				else {
 					fprintf(stderr,"Unknown vhs tape speed '%s'\n",a);
