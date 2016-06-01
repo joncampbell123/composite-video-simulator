@@ -675,7 +675,7 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;
 				emulating_preemphasis = false; // no preemphasis by default
 				emulating_deemphasis = false; // no preemphasis by default
-				video_chroma_noise = 4;
+				video_chroma_noise = 6;
 				video_noise = 4; // VHS is a bit noisy
 			}
 			else if (!strcmp(a,"preemphasis")) {
@@ -698,17 +698,17 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;			// implies -vhs
 				if (!strcmp(a,"ep")) {
 					output_vhs_tape_speed = VHS_EP;
-					video_chroma_noise = 6;
+					video_chroma_noise = 8;
 					video_noise = 6;
 				}
 				else if (!strcmp(a,"lp")) {
 					output_vhs_tape_speed = VHS_LP;
-					video_chroma_noise = 5;
+					video_chroma_noise = 7;
 					video_noise = 5;
 				}
 				else if (!strcmp(a,"sp")) {
 					output_vhs_tape_speed = VHS_SP;
-					video_chroma_noise = 4;
+					video_chroma_noise = 6;
 					video_noise = 4;
 				}
 				else {
