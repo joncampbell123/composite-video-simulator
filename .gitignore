@@ -1,6 +1,8 @@
 ffmpeg_to_composite
 autom4te.cache
 aclocal.m4
+.deps
+.deps/*
 *~
 *.o
 *.a
