@@ -339,6 +339,53 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 }
 
 void composite_video_process(AVFrame *dst,unsigned int field) {
+	unsigned int x,y;
+
+	{ /* lowpass the luma slightly */
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *s = dst->data[0] + (y * dst->linesize[0]);
+			unsigned char ppppc = 16,pppc = 16,ppc,pc,c;
+
+			ppc = s[0];
+			pc = s[1];
+			for (x=0;x < dst->width;x++) {
+				c = s[x+2];
+				s[x] = (ppppc + pppc + pppc + ppc + ppc + pc + pc + c + 3) >> 3;
+				ppppc = pppc;
+				pppc = ppc;
+				ppc = pc;
+				pc = c;
+			}
+		}
+	}
+
+	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
+		for (unsigned int p=1;p <= 2;p++) {
+			for (y=field;y < dst->height;y += 2) {
+				unsigned char *s = dst->data[p] + (y * dst->linesize[p]);
+				unsigned char pppppppppc = 128,ppppppppc = 128,pppppppc = 128,ppppppc = 128,pppppc = 128,ppppc = 128,pppc,ppc,pc,c;
+
+				ppppc = s[0];
+				pppc = s[1];
+				ppc = s[2];
+				pc = s[3];
+				for (x=0;x < (dst->width/2)/*4:2:2*/;x++) {
+					c = s[x+4];
+					s[x] = (pppppppppc + ppppppppc + pppppppc + pppppppc + ppppppc + ppppppc +
+						pppppc + pppppc + ppppc + ppppc + pppc + pppc + ppc + ppc + pc + c + 8) >> 4;
+					pppppppppc = ppppppppc;
+					ppppppppc = pppppppc;
+					pppppppc = ppppppc;
+					ppppppc = pppppc;
+					pppppc = ppppc;
+					ppppc = pppc;
+					pppc = ppc;
+					ppc = pc;
+					pc = c;
+				}
+			}
+		}
+	}
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
