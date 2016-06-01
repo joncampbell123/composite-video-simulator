@@ -591,6 +591,7 @@ int main(int argc,char **argv) {
 	audio_hilopass.init();
 
 	if (true/*TODO: whether to emulate preemphasis*/) {
+		// TODO: VHS Hi-Fi obviously uses different preemphasis! What would the right settings be?
 		for (unsigned int i=0;i < output_audio_channels;i++) {
 			audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
 			audio_linear_preemphasis_post[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
