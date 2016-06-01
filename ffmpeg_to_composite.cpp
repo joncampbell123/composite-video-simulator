@@ -415,7 +415,7 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 
 	frame->interlaced_frame = 1;
 	frame->top_field_first = 0; // NTSC is bottom field first
-	frame->pts = field_number;
+	frame->pts = field_number / 2ULL;
 	pkt.pts = field_number / 2ULL;
 	pkt.dts = field_number / 2ULL;
 	frame->key_frame = (field_number % (15ULL * 2ULL)) == 0 ? 1 : 0;
@@ -731,12 +731,10 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->height = output_height;
 		output_avstream_video_codec_context->sample_aspect_ratio = (AVRational){output_height*4, output_width*3};
 		output_avstream_video_codec_context->pix_fmt = AV_PIX_FMT_YUV422P;
-		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num}; // NTS: divide by 2 to convert fields -> frames
+		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, (output_field_rate.num/2)};
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
-		output_avstream_video_codec_context->ticks_per_frame = 2; // interlaced video
 		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
-		output_avstream_video->time_base.den /= 2; // interlaced video
 
 		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
 			output_avstream_video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -901,7 +899,8 @@ int main(int argc,char **argv) {
 				}
 			}
 			else if (input_avstream_video != NULL && pkt.stream_index == input_avstream_video->index) {
-				av_packet_rescale_ts(&pkt,input_avstream_video->time_base,output_avstream_video_codec_context->time_base); // convert to FIELD number
+				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
+				av_packet_rescale_ts(&pkt,input_avstream_video->time_base,m); // convert to FIELD number
 
 				if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
 					if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
