@@ -317,6 +317,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs                      Emulation of VHS artifacts\n");
 	fprintf(stderr," -vhs-hifi <0|1>           (default on)\n");
 	fprintf(stderr," -vhs-speed <ep|lp|sp>     (default sp)\n");
+	fprintf(stderr," -preemphasis <0|1>        Enable preemphasis emulation\n");
+	fprintf(stderr," -deemphasis <0|1>         Enable deepmhasis emulation\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -340,6 +342,14 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;
 				emulating_preemphasis = true;		// emulate preemphasis
 				emulating_deemphasis = true;		// emulate deemphasis
+			}
+			else if (!strcmp(a,"preemphasis")) {
+				int x = atoi(argv[i++]);
+				emulating_preemphasis = (x > 0);
+			}
+			else if (!strcmp(a,"deemphasis")) {
+				int x = atoi(argv[i++]);
+				emulating_deemphasis = (x > 0);
 			}
 			else if (!strcmp(a,"i")) {
 				input_file = argv[i++];
