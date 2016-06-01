@@ -288,6 +288,8 @@ bool		output_vhs_linear_audio = false; // if true (non Hi-Fi) then we emulate hi
 bool		emulating_vhs = false;
 bool		emulating_preemphasis = true;		// emulate preemphasis
 bool		emulating_deemphasis = true;		// emulate deemphasis
+bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
+bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
 
 enum {
 	VHS_SP=0,
@@ -418,7 +420,41 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				Y[2] = clampu8(Y[2] - ((((int)U[1] - 128) * subcarrier_amplitude) / 50));
 				Y[3] = clampu8(Y[3] - ((((int)V[1] - 128) * subcarrier_amplitude) / 50));
 
-				U[0] = V[0] = U[1] = V[1] = 128;
+				if (nocolor_subcarrier)
+					U[0] = V[0] = U[1] = V[1] = 128;
+			}
+		}
+	}
+
+	/* filter subcarrier back out, use result to emulate NTSC luma-chroma artifacts */
+	if (!nocolor_subcarrier) {
+		unsigned char chroma[dst->width]; // WARNING: This is more GCC-specific C++ than normal
+
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+			unsigned char delay[4] = {16,16,16,16};
+			unsigned int sum = 16 * (4 - 2);
+			unsigned char c;
+
+			// precharge by 2 pixels to center box blur
+			delay[2] = Y[0]; sum += delay[2];
+			delay[3] = Y[1]; sum += delay[3];
+			for (x=0;x < dst->width;x++) {
+				c = Y[x+2];
+				sum -= delay[0];
+				for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
+				delay[3] = c;
+				sum += delay[3];
+				Y[x] = sum / 4;
+				chroma[x] = clampu8(c + 128 - Y[x]);
+
+				if (nocolor_subcarrier_after_yc_sep) {
+					// debug option to SHOW what we got after filtering
+					Y[x] = chroma[x];
+					U[x/2] = V[x/2] = 128;
+				}
 			}
 		}
 	}
@@ -552,6 +588,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-speed <ep|lp|sp>     (default sp)\n");
 	fprintf(stderr," -preemphasis <0|1>        Enable preemphasis emulation\n");
 	fprintf(stderr," -deemphasis <0|1>         Enable deepmhasis emulation\n");
+	fprintf(stderr," -nocolor-subcarrier       Emulate color subcarrier but do not decode back (debug)\n");
+	fprintf(stderr," -nocolor-subcarrier-after-yc-sep Emulate Y/C subcarrier separation but do not decode back (debug)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -570,6 +608,12 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+			}
+			else if (!strcmp(a,"nocolor-subcarrier")) {
+				nocolor_subcarrier = true;
+			}
+			else if (!strcmp(a,"nocolor-subcarrier-after-yc-sep")) {
+				nocolor_subcarrier_after_yc_sep = true;
 			}
 			else if (!strcmp(a,"vhs")) {
 				emulating_vhs = true;
