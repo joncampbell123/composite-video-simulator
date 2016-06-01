@@ -40,6 +40,7 @@
 #define __STDC_CONSTANT_MACROS
 
 #include <sys/types.h>
+#include <signal.h>
 #include <stdint.h>
 #include <assert.h>
 #include <unistd.h>
@@ -74,6 +75,12 @@ using namespace std;
 
 #include <string>
 #include <vector>
+
+volatile int DIE = 0;
+
+void sigma(int x) {
+	if (++DIE >= 20) abort();
+}
 
 string		input_file;
 string		output_file;
@@ -760,6 +767,12 @@ int main(int argc,char **argv) {
 		return 1;
 	}
 
+	/* soft break on CTRL+C */
+	signal(SIGINT,sigma);
+	signal(SIGHUP,sigma);
+	signal(SIGQUIT,sigma);
+	signal(SIGTERM,sigma);
+
 	/* prepare audio filtering */
 	audio_hilopass.setChannels(output_audio_channels);
 	audio_hilopass.setRate(output_audio_rate);
@@ -839,6 +852,8 @@ int main(int argc,char **argv) {
 
 		av_init_packet(&pkt);
 		while (av_read_frame(input_avfmt,&pkt) >= 0) {
+			if (DIE != 0) break;
+
 			if (input_avstream_audio != NULL && pkt.stream_index == input_avstream_audio->index) {
 				av_packet_rescale_ts(&pkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
 				if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
@@ -1004,8 +1019,6 @@ int main(int argc,char **argv) {
 				else {
 					fprintf(stderr,"No video decoded\n");
 				}
-			}
-			else {
 			}
 
 			av_packet_unref(&pkt);
