@@ -323,6 +323,89 @@ static inline int clips16(const int x) {
 	return x;
 }
 
+/* render the chroma into the luma as a fake NTSC color subcarrier */
+void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
+	unsigned int x,y;
+
+	for (y=field;y < dst->height;y += 2) {
+		unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+		unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+		unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+		unsigned int xc = dst->width;
+
+		if (((fieldno^y)>>1)&1) {
+			Y += 2;
+			xc -= 2;
+		}
+
+		/* remember: this code assumes 4:2:2 */
+		/* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
+		for (x=0;x < xc;x += 4,Y += 4,U += 2,V += 2) {
+			Y[0] = clampu8(Y[0] + ((((int)U[0] - 128) * subcarrier_amplitude) / 50));
+			Y[1] = clampu8(Y[1] + ((((int)V[0] - 128) * subcarrier_amplitude) / 50));
+			Y[2] = clampu8(Y[2] - ((((int)U[1] - 128) * subcarrier_amplitude) / 50));
+			Y[3] = clampu8(Y[3] - ((((int)V[1] - 128) * subcarrier_amplitude) / 50));
+
+			if (nocolor_subcarrier)
+				U[0] = V[0] = U[1] = V[1] = 128;
+		}
+	}
+}
+
+/* filter subcarrier back out, use result to emulate NTSC luma-chroma artifacts */
+void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
+	unsigned char chroma[dst->width]; // WARNING: This is more GCC-specific C++ than normal
+	unsigned int x,y;
+
+	for (y=field;y < dst->height;y += 2) {
+		unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+		unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+		unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+		unsigned char delay[4] = {16,16,16,16};
+		unsigned int sum = 16 * (4 - 2);
+		unsigned char c;
+
+		// precharge by 2 pixels to center box blur
+		delay[2] = Y[0]; sum += delay[2];
+		delay[3] = Y[1]; sum += delay[3];
+		for (x=0;x < dst->width;x++) {
+			c = Y[x+2];
+			sum -= delay[0];
+			for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
+			delay[3] = c;
+			sum += delay[3];
+			Y[x] = sum / 4;
+			chroma[x] = clampu8(c + 128 - Y[x]);
+
+			if (nocolor_subcarrier_after_yc_sep) {
+				// debug option to SHOW what we got after filtering
+				Y[x] = chroma[x];
+				U[x/2] = V[x/2] = 128;
+			}
+		}
+
+		if (!nocolor_subcarrier_after_yc_sep) {
+			unsigned int xi = 0;
+			if (((fieldno^y)>>1)&1) xi = 2;
+
+			for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
+				chroma[x+2] = 255 - chroma[x+2];
+				chroma[x+3] = 255 - chroma[x+3];
+			}
+
+			for (x=0;x < dst->width;x++) {
+				chroma[x] = clampu8(((((int)chroma[x] - 128) * 50) / subcarrier_amplitude) + 128);
+			}
+
+			/* decode the color right back out from the subcarrier we generated */
+			for (x=0;x < (dst->width/2);x++) {
+				U[x] = 255 - chroma[(x*2)+0];
+				V[x] = 255 - chroma[(x*2)+1];
+			}
+		}
+	}
+}
+
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
 
@@ -391,32 +474,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 	}
 
-	/* render the chroma into the luma as a fake NTSC color subcarrier */
-	{
-		for (y=field;y < dst->height;y += 2) {
-			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
-			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
-			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
-			unsigned int xc = dst->width;
-
-			if (((fieldno^y)>>1)&1) {
-				Y += 2;
-				xc -= 2;
-			}
-
-			/* remember: this code assumes 4:2:2 */
-			/* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
-			for (x=0;x < xc;x += 4,Y += 4,U += 2,V += 2) {
-				Y[0] = clampu8(Y[0] + ((((int)U[0] - 128) * subcarrier_amplitude) / 50));
-				Y[1] = clampu8(Y[1] + ((((int)V[0] - 128) * subcarrier_amplitude) / 50));
-				Y[2] = clampu8(Y[2] - ((((int)U[1] - 128) * subcarrier_amplitude) / 50));
-				Y[3] = clampu8(Y[3] - ((((int)V[1] - 128) * subcarrier_amplitude) / 50));
-
-				if (nocolor_subcarrier)
-					U[0] = V[0] = U[1] = V[1] = 128;
-			}
-		}
-	}
+	composite_video_yuv_to_ntsc(dst,field,fieldno);
 
 	/* add video noise */
 	if (video_noise != 0) {
@@ -433,58 +491,8 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 	}
 
-	/* filter subcarrier back out, use result to emulate NTSC luma-chroma artifacts */
-	if (!nocolor_subcarrier) {
-		unsigned char chroma[dst->width]; // WARNING: This is more GCC-specific C++ than normal
-
-		for (y=field;y < dst->height;y += 2) {
-			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
-			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
-			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
-			unsigned char delay[4] = {16,16,16,16};
-			unsigned int sum = 16 * (4 - 2);
-			unsigned char c;
-
-			// precharge by 2 pixels to center box blur
-			delay[2] = Y[0]; sum += delay[2];
-			delay[3] = Y[1]; sum += delay[3];
-			for (x=0;x < dst->width;x++) {
-				c = Y[x+2];
-				sum -= delay[0];
-				for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
-				delay[3] = c;
-				sum += delay[3];
-				Y[x] = sum / 4;
-				chroma[x] = clampu8(c + 128 - Y[x]);
-
-				if (nocolor_subcarrier_after_yc_sep) {
-					// debug option to SHOW what we got after filtering
-					Y[x] = chroma[x];
-					U[x/2] = V[x/2] = 128;
-				}
-			}
-
-			if (!nocolor_subcarrier_after_yc_sep) {
-				unsigned int xi = 0;
-				if (((fieldno^y)>>1)&1) xi = 2;
-
-				for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
-					chroma[x+2] = 255 - chroma[x+2];
-					chroma[x+3] = 255 - chroma[x+3];
-				}
-
-				for (x=0;x < dst->width;x++) {
-					chroma[x] = clampu8(((((int)chroma[x] - 128) * 50) / subcarrier_amplitude) + 128);
-				}
-
-				/* decode the color right back out from the subcarrier we generated */
-				for (x=0;x < (dst->width/2);x++) {
-					U[x] = 255 - chroma[(x*2)+0];
-					V[x] = 255 - chroma[(x*2)+1];
-				}
-			}
-		}
-	}
+	if (!nocolor_subcarrier)
+		composite_ntsc_to_yuv(dst,field,fieldno);
 
 	/* add video noise */
 	if (video_chroma_noise != 0) {
