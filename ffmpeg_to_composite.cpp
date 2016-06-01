@@ -276,6 +276,7 @@ bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
+double		output_audio_hiss_db = -72;
 double		output_audio_linear_buzz = -42;	// how loud the "buzz" is audible in dBFS (S/N). Ever notice on old VHS tapes (prior to Hi-Fi) you can almost hear the video signal sync pulses in the audio?
 double		output_audio_highpass = 20; // highpass to filter out below 20Hz
 double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
@@ -292,6 +293,8 @@ bool		emulating_preemphasis = true;		// emulate preemphasis
 bool		emulating_deemphasis = true;		// emulate deemphasis
 bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
 bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
+
+int		output_audio_hiss_level = 0; // out of 10000
 
 enum {
 	VHS_SP=0,
@@ -340,6 +343,10 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 				s = 1.0;
 			else if (s < -1.0)
 				s = -1.0;
+
+			/* hiss */
+			if (output_audio_hiss_level != 0)
+				s += ((double)(((int)((unsigned int)rand() % ((output_audio_hiss_level * 2) + 1))) - output_audio_hiss_level)) / 20000;
 
 			if (emulating_deemphasis) {
 				for (unsigned int i=0;i < output_audio_channels;i++) {
@@ -634,6 +641,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -subcarrier-amp <0...100> Subcarrier amplitude (0 to 100 percent of luma)\n");
 	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
 	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
+	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -652,6 +660,9 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+			}
+			else if (!strcmp(a,"audio-hiss")) {
+				output_audio_hiss_db = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"chroma-noise")) {
 				int x = atoi(argv[i++]);
@@ -675,6 +686,7 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;
 				emulating_preemphasis = false; // no preemphasis by default
 				emulating_deemphasis = false; // no preemphasis by default
+				output_audio_hiss_db = -70;
 				video_chroma_noise = 6;
 				video_noise = 4; // VHS is a bit noisy
 			}
@@ -724,6 +736,10 @@ static int parse_argv(int argc,char **argv) {
 				if (output_vhs_hifi) {
 					emulating_preemphasis = true;
 					emulating_deemphasis = true;
+					output_audio_hiss_db = -70;
+				}
+				else {
+					output_audio_hiss_db = -42;
 				}
 			}
 			else if (!strcmp(a,"tvstd")) {
@@ -785,6 +801,8 @@ static int parse_argv(int argc,char **argv) {
 		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 		output_audio_channels = 2;
 	}
+
+	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 10000;
 
 	if (input_file.empty() || output_file.empty()) {
 		fprintf(stderr,"You must specify an input and output file (-i and -o).\n");
