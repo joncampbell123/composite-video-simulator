@@ -731,7 +731,7 @@ void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long lon
 		else {
 			for (unsigned int p=0;p < 3;p++) {
 				unsigned char *s1 = src->data[p] + (src->linesize[p] * sy);
-				unsigned char *s2 = src->data[p] + (src->linesize[p] * sy);
+				unsigned char *s2 = src->data[p] + (src->linesize[p] * sy2);
 				unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
 
 				for (unsigned int x=0;x < src->linesize[p];x++)
