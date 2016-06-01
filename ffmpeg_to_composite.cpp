@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <math.h>
 
 extern "C" {
 #include <libavutil/opt.h>
@@ -38,6 +39,65 @@ using namespace std;
 string		input_file;
 string		output_file;
 
+/* return a floating point value specifying what to scale the sample
+ * value by to reduce it from full volume to dB decibels */
+double dBFS(double dB)
+{
+	/* 10 ^ (dB / 20),
+	   based on reversing the formula for converting samples to decibels:
+	   dB = 20.0 * log10(sample);
+	   where "sample" is -1.0 <= x <= 1.0 */
+	return pow(10.0,dB / 20.0);
+}
+
+/* attenuate a sample value by this many dBFS */
+/* so if you want to reduce it by 20dBFS you pass -20 as dB */
+double attenuate_dBFS(double sample,double dB)
+{
+	return sample * dBFS(dB);
+}
+
+/* opposite: convert sample to decibels */
+double dBFS_measure(double sample) {
+	return 20.0 * log10(sample);
+}
+
+// lowpass filter
+// you can make it a highpass filter by applying a lowpass then subtracting from source.
+class LowpassFilter {
+public:
+	LowpassFilter() : timeInterval(0), cutoff(0), alpha(0), prev(0), tau(0) {
+	}
+	void setFilter(const double rate/*sample rate of audio*/,const double hz/*cutoff*/) {
+#ifndef M_PI
+#error your math.h does not include M_PI constant
+#endif
+		timeInterval = 1.0 / rate;
+		tau = 1 / (hz * 2 * M_PI);
+		cutoff = hz;
+		alpha = timeInterval / (tau + timeInterval);
+	}
+	void resetFilter() {
+		prev = 0;
+	}
+	double lowpass(const double sample) {
+		const double stage1 = sample * alpha;
+		const double stage2 = prev - (prev * alpha); /* NTS: Instead of prev * (1.0 - alpha) */
+		return (prev = (stage1 + stage2)); /* prev = stage1+stage2 then return prev */
+	}
+	double highpass(const double sample) {
+		const double stage1 = sample * alpha;
+		const double stage2 = prev - (prev * alpha); /* NTS: Instead of prev * (1.0 - alpha) */
+		return sample - (prev = (stage1 + stage2)); /* prev = stage1+stage2 then return (sample - prev) */
+	}
+public:
+	double			timeInterval;
+	double			cutoff;
+	double			alpha; /* timeInterval / (tau + timeInterval) */
+	double			prev;
+	double			tau;
+};
+
 AVFormatContext*	input_avfmt = NULL;
 AVStream*		input_avstream_audio = NULL;	// do not free
 AVCodecContext*		input_avstream_audio_codec_context = NULL; // do not free
@@ -58,9 +118,10 @@ int		output_height = 480;
 bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
-int		output_audio_rate = 40000;	// VHS Hi-Fi goes up to 20KHz
+int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 double		output_audio_linear_buzz = -42;	// how loud the "buzz" is audible in dBFS (S/N). Ever notice on old VHS tapes (prior to Hi-Fi) you can almost hear the video signal sync pulses in the audio?
 double		output_audio_highpass = 20; // highpass to filter out below 20Hz
+double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 // NTS:
 //   VHS Hi-Fi: 20Hz - 20KHz                  (70dBFS S/N)
 //   VHS SP:    100Hz - 10KHz                 (42dBFS S/N)
