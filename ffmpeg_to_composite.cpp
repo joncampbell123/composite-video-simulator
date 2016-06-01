@@ -352,6 +352,78 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 	}
 }
 
+// VHS is documented to use a delay line with chroma to vertically smear the color.
+// phase shifting is used per scanline to make the subcarrier line up for blending.
+void composite_ntsc_to_yuv_vhs(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
+	unsigned char pchroma[dst->width];
+	unsigned char cchroma[dst->width];
+	unsigned char chroma[dst->width];
+	unsigned int x,y;
+
+	memset(pchroma,128,dst->width);
+
+	for (y=field;y < dst->height;y += 2) {
+		unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+		unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+		unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+		unsigned char delay[4] = {16,16,16,16};
+		unsigned int sum = 16 * (4 - 2);
+		unsigned char c;
+
+		// precharge by 2 pixels to center box blur
+		delay[2] = Y[0]; sum += delay[2];
+		delay[3] = Y[1]; sum += delay[3];
+		for (x=0;x < dst->width;x++) {
+			c = Y[x+2];
+			sum -= delay[0];
+			for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
+			delay[3] = c;
+			sum += delay[3];
+			Y[x] = sum / 4;
+			cchroma[x] = clampu8(c + 128 - Y[x]);
+
+			if (nocolor_subcarrier_after_yc_sep) {
+				// debug option to SHOW what we got after filtering
+				Y[x] = cchroma[x];
+				U[x/2] = V[x/2] = 128;
+			}
+		}
+
+		bool adv = (((fieldno^y)>>1)&1)?true:false;
+
+		if (adv) {
+			for (x=2;x < dst->width;x++)
+				chroma[x] = (cchroma[x+2] + pchroma[x]) / 2;
+		}
+		else {
+			for (x=2;x < dst->width;x++)
+				chroma[x] = (cchroma[x-2] + pchroma[x]) / 2;
+		}
+
+		if (!nocolor_subcarrier_after_yc_sep) {
+			unsigned int xi = 0;
+			if (((fieldno^y)>>1)&1) xi = 2;
+
+			for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
+				chroma[x+2] = 255 - chroma[x+2];
+				chroma[x+3] = 255 - chroma[x+3];
+			}
+
+			for (x=0;x < dst->width;x++) {
+				chroma[x] = clampu8(((((int)chroma[x] - 128) * 50) / subcarrier_amplitude) + 128);
+			}
+
+			/* decode the color right back out from the subcarrier we generated */
+			for (x=0;x < (dst->width/2);x++) {
+				U[x] = chroma[(x*2)+0];
+				V[x] = chroma[(x*2)+1];
+			}
+		}
+
+		memcpy(pchroma,cchroma,dst->width);
+	}
+}
+
 /* filter subcarrier back out, use result to emulate NTSC luma-chroma artifacts */
 void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
 	unsigned char chroma[dst->width]; // WARNING: This is more GCC-specific C++ than normal
@@ -588,19 +660,15 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			}
 		}
 
-		// chroma vblend
-		if (vhs_chroma_vert_blend) {
-			for (unsigned int p=1;p <= 2;p++) {
-				for (y=field;y < (dst->height-2);y += 2) {
-					unsigned char *Y = dst->data[p] + (y * dst->linesize[p]);
-					unsigned char *Y2 = dst->data[p] + ((y+2) * dst->linesize[p]);
+		// VCRs separate luma and chroma again as part of remodulating the signals onto tape.
+		// VHS uses "color under".
+		composite_video_yuv_to_ntsc(dst,field,fieldno);
 
-					for (x=0;x < (dst->width/2);x++) {
-						Y[x] = (Y[x] + Y2[x] + 1) >> 1;
-					}
-				}
-			}
-		}
+		// and then the act of playing the tape
+		if (vhs_chroma_vert_blend)
+			composite_ntsc_to_yuv_vhs(dst,field,fieldno);
+		else
+			composite_ntsc_to_yuv(dst,field,fieldno);
 	}
 }
 
