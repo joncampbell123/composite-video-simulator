@@ -268,7 +268,7 @@ AVFrame*		output_avstream_video_frame = NULL;
 
 int		video_chroma_noise = 0;
 int		video_noise = 2;
-int		subcarrier_amplitude = 80;
+int		subcarrier_amplitude = 50;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
 int		output_height = 480;
