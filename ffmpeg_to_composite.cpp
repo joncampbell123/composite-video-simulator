@@ -266,6 +266,7 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+int		subcarrier_amplitude = 80;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
 int		output_height = 480;
@@ -295,6 +296,15 @@ enum {
 };
 
 int		output_vhs_tape_speed = VHS_SP;
+
+static inline int clampu8(const int x) {
+	if (x > 255)
+		return 255;
+	else if (x < 0)
+		return 0;
+
+	return x;
+}
 
 static inline int clips16(const int x) {
 	if (x < -32768)
@@ -338,7 +348,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 	}
 }
 
-void composite_video_process(AVFrame *dst,unsigned int field) {
+void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
 	unsigned int x,y;
 
 	{ /* lowpass the luma slightly */
@@ -383,6 +393,30 @@ void composite_video_process(AVFrame *dst,unsigned int field) {
 					ppc = pc;
 					pc = c;
 				}
+			}
+		}
+	}
+
+	/* render the chroma into the luma as a fake NTSC color subcarrier */
+	{
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+			unsigned int xc = dst->width;
+
+			if (((fieldno^y)>>1)&1) {
+				Y += 2;
+				xc -= 2;
+			}
+
+			/* remember: this code assumes 4:2:2 */
+			/* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
+			for (x=0;x < xc;x += 4,Y += 4,U += 2,V += 2) {
+				Y[0] = clampu8(Y[0] + ((((int)U[0] - 128) * subcarrier_amplitude) / 50));
+				Y[1] = clampu8(Y[1] + ((((int)V[0] - 128) * subcarrier_amplitude) / 50));
+				Y[2] = clampu8(Y[2] - ((((int)U[1] - 128) * subcarrier_amplitude) / 50));
+				Y[3] = clampu8(Y[3] - ((((int)V[1] - 128) * subcarrier_amplitude) / 50));
 			}
 		}
 	}
@@ -980,7 +1014,7 @@ int main(int argc,char **argv) {
 						if (output_avstream_video_input_frame != NULL) {
 							while (video_field < tgt_field) {
 								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL),video_field);
-								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL));
+								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL),video_field);
 								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
 								video_field++;
 							}
@@ -1056,7 +1090,7 @@ int main(int argc,char **argv) {
 
 							while (video_field < tgt_field) {
 								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL),video_field);
-								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL));
+								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL),video_field);
 								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
 								video_field++;
 							}
