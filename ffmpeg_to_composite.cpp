@@ -237,6 +237,9 @@ double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 bool		output_vhs_hifi = true;
 bool		output_vhs_linear_stereo = false; // not common
 bool		output_vhs_linear_audio = false; // if true (non Hi-Fi) then we emulate hiss and noise of linear VHS tracks including the video sync pulses audible in the audio.
+bool		emulating_vhs = false;
+bool		emulating_preemphasis = true;		// emulate preemphasis
+bool		emulating_deemphasis = true;		// emulate deemphasis
 
 enum {
 	VHS_SP=0,
@@ -265,7 +268,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			s = (double)audio[c] / 32768;
 			s = audio_hilopass.audiostate[c].filter(s);
 
-			if (true/*TODO: Whether to emulate preemphasis*/) {
+			if (emulating_preemphasis) {
 				for (unsigned int i=0;i < output_audio_channels;i++) {
 					s = s + audio_linear_preemphasis_pre[i].highpass(s);
 				}
@@ -277,7 +280,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			else if (s < -1.0)
 				s = -1.0;
 
-			if (true/*TODO: Whether to emulate preemphasis. Personal experience also says some VCRs do not do this stage if they auto-sense the audio is too muffled*/) {
+			if (emulating_deemphasis) {
 				for (unsigned int i=0;i < output_audio_channels;i++) {
 					s = audio_linear_preemphasis_post[i].lowpass(s);
 				}
@@ -311,7 +314,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -i <input file>\n");
 	fprintf(stderr," -o <output file>\n");
 	fprintf(stderr," -tvstd <pal|ntsc>\n");
-	fprintf(stderr," -vhs-hifi <0|1>    (default on)\n");
+	fprintf(stderr," -vhs                      Emulation of VHS artifacts\n");
+	fprintf(stderr," -vhs-hifi <0|1>           (default on)\n");
 	fprintf(stderr," -vhs-speed <ep|lp|sp>     (default sp)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
@@ -332,6 +336,11 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+			else if (!strcmp(a,"vhs")) {
+				emulating_vhs = true;
+				emulating_preemphasis = true;		// emulate preemphasis
+				emulating_deemphasis = true;		// emulate deemphasis
+			}
 			else if (!strcmp(a,"i")) {
 				input_file = argv[i++];
 			}
@@ -341,6 +350,7 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"vhs-speed")) {
 				a = argv[i++];
 
+				emulating_vhs = true;			// implies -vhs
 				if (!strcmp(a,"ep")) {
 					output_vhs_tape_speed = VHS_EP;
 				}
@@ -359,6 +369,7 @@ static int parse_argv(int argc,char **argv) {
 				int x = atoi(argv[i++]);
 				output_vhs_hifi = (x > 0);
 				output_vhs_linear_audio = !output_vhs_hifi;
+				emulating_vhs = true;			// implies -vhs
 			}
 			else if (!strcmp(a,"tvstd")) {
 				a = argv[i++];
@@ -385,31 +396,39 @@ static int parse_argv(int argc,char **argv) {
 		}
 	}
 
-	if (output_vhs_hifi) {
+	if (emulating_vhs) {
+		if (output_vhs_hifi) {
+			output_audio_highpass = 20; // highpass to filter out below 20Hz
+			output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
+			output_audio_channels = 2;
+		}
+		else if (output_vhs_linear_audio) {
+			switch (output_vhs_tape_speed) {
+				case VHS_SP:
+					output_audio_highpass = 100; // highpass to filter out below 100Hz
+					output_audio_lowpass = 10000; // lowpass to filter out above 10KHz
+					break;
+				case VHS_LP:
+					output_audio_highpass = 100; // highpass to filter out below 100Hz
+					output_audio_lowpass = 7000; // lowpass to filter out above 7KHz
+					break;
+				case VHS_EP:
+					output_audio_highpass = 100; // highpass to filter out below 100Hz
+					output_audio_lowpass = 4000; // lowpass to filter out above 4KHz
+					break;
+			}
+
+			if (!output_vhs_linear_stereo)
+				output_audio_channels = 1;
+			else
+				output_audio_channels = 2;
+		}
+	}
+	else {
+		// not emulating VHS
 		output_audio_highpass = 20; // highpass to filter out below 20Hz
 		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 		output_audio_channels = 2;
-	}
-	else if (output_vhs_linear_audio) {
-		switch (output_vhs_tape_speed) {
-			case VHS_SP:
-				output_audio_highpass = 100; // highpass to filter out below 100Hz
-				output_audio_lowpass = 10000; // lowpass to filter out above 10KHz
-				break;
-			case VHS_LP:
-				output_audio_highpass = 100; // highpass to filter out below 100Hz
-				output_audio_lowpass = 7000; // lowpass to filter out above 7KHz
-				break;
-			case VHS_EP:
-				output_audio_highpass = 100; // highpass to filter out below 100Hz
-				output_audio_lowpass = 4000; // lowpass to filter out above 4KHz
-				break;
-		}
-
-		if (!output_vhs_linear_stereo)
-			output_audio_channels = 1;
-		else
-			output_audio_channels = 2;
 	}
 
 	if (input_file.empty() || output_file.empty()) {
@@ -590,11 +609,30 @@ int main(int argc,char **argv) {
 	audio_hilopass.setPasses(8);
 	audio_hilopass.init();
 
-	if (true/*TODO: whether to emulate preemphasis*/) {
-		// TODO: VHS Hi-Fi obviously uses different preemphasis! What would the right settings be?
-		for (unsigned int i=0;i < output_audio_channels;i++) {
-			audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
-			audio_linear_preemphasis_post[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+	// TODO: VHS Hi-Fi is also documented to use 2:1 companding when recording, which we do not yet emulate
+
+	if (emulating_preemphasis) {
+		if (output_vhs_hifi) {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,20000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+		else {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+	}
+	if (emulating_deemphasis) {
+		if (output_vhs_hifi) {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,20000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+		else {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+			}
 		}
 	}
 
