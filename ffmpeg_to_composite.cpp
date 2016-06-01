@@ -392,7 +392,7 @@ void composite_ntsc_to_yuv_vhs(AVFrame *dst,unsigned int field,unsigned long lon
 		bool adv = (((fieldno^y)>>1)&1)?true:false;
 
 		if (adv) {
-			for (x=2;x < dst->width;x++)
+			for (x=0;x < dst->width;x++)
 				chroma[x] = (cchroma[x+2] + pchroma[x]) / 2;
 		}
 		else {
