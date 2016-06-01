@@ -198,6 +198,10 @@ public:
 
 HiLoComboPass		audio_hilopass;
 
+// preemphsis emuluation
+LowpassFilter		audio_linear_preemphasis_pre[2];
+LowpassFilter		audio_linear_preemphasis_post[2];
+
 AVFormatContext*	input_avfmt = NULL;
 AVStream*		input_avstream_audio = NULL;	// do not free
 AVCodecContext*		input_avstream_audio_codec_context = NULL; // do not free
@@ -255,8 +259,32 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
 
 	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
-		for (unsigned int c=0;c < output_audio_channels;c++)
-			audio[c] = clips16((int)audio_hilopass.audiostate[c].filter((double)audio[c]));
+		for (unsigned int c=0;c < output_audio_channels;c++) {
+			double s;
+
+			s = (double)audio[c] / 32768;
+			s = audio_hilopass.audiostate[c].filter(s);
+
+			if (true/*TODO: Whether to emulate preemphasis*/) {
+				for (unsigned int i=0;i < output_audio_channels;i++) {
+					s = s + audio_linear_preemphasis_pre[i].highpass(s);
+				}
+			}
+
+			/* analog limiting (when the signal is too loud) */
+			if (s > 1.0)
+				s = 1.0;
+			else if (s < -1.0)
+				s = -1.0;
+
+			if (true/*TODO: Whether to emulate preemphasis. Personal experience also says some VCRs do not do this stage if they auto-sense the audio is too muffled*/) {
+				for (unsigned int i=0;i < output_audio_channels;i++) {
+					s = audio_linear_preemphasis_post[i].lowpass(s);
+				}
+			}
+
+			audio[c] = clips16(s * 32768);
+		}
 	}
 }
 
@@ -561,6 +589,13 @@ int main(int argc,char **argv) {
 	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass); // hey, our filters aren't perfect
 	audio_hilopass.setPasses(8);
 	audio_hilopass.init();
+
+	if (true/*TODO: whether to emulate preemphasis*/) {
+		for (unsigned int i=0;i < output_audio_channels;i++) {
+			audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+			audio_linear_preemphasis_post[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+		}
+	}
 
 	/* prepare audio decoding */
 	input_avstream_audio_frame = av_frame_alloc();
