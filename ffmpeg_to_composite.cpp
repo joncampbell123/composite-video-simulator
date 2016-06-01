@@ -1,3 +1,41 @@
+// what to do next:
+//
+// VHS Hi-Fi "buzz"
+//
+// Video decoding (scaling to 720x480 or 720x576, frame/field rate conversion to interlaced video, encode)
+// When done, all video will be rendered as if 720x480 29.97fps interlaced or 720x576 25fps interlaced.
+//
+// Fake NTSC color subcarrier generation (from chroma planes into luma).
+//
+// Rendering of color back out from luma plane fake subcarrier (NTSC artifacts and all)
+//
+// If emulating PAL, fake subcarrier needs to alternate color phase every other field scanline.
+//
+// Luma smearing/sharpen filtering to emulate analog degredation and "sharpening" in analog equipment to compensate.
+//
+// Additional luma smearing/sharpening as a side effect of preemphasis and modulation onto VHS tape.
+//
+// Video noise.
+//
+// VHS audio linear track video+audio crosstalk (ever notice you can almost hear the video signal in the audio?) and hiss.
+//
+// Luma/chroma instability and noise.
+//
+// Fake macrovision "darkening" of the top of the picture, and
+//
+// Fake macrovision "bend" at the top of the picture.
+//
+// Analog video "banding", slight but noticeable bright/dark bands that vary according to video content.
+//
+// Minor VHS noise (occasional white specks)
+//
+// Tracking noise (the staticky band at the bottom of the screen).
+//
+// After processing audio, allow encode through non-PCM codec and write to output.
+//
+// After processing video, allow encode through non-uncompressed codec and write to output.
+//
+// FFMPEG-like options to specify which audio track to use (so DVD rips don't accidentally use the non-English tracks).
 
 #define __STDC_CONSTANT_MACROS
 
