@@ -597,11 +597,11 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				chroma_cut = 400000; // 400KHz
 				break;
 			case VHS_LP:
-				luma_cut = 2700000; // 2.7MHz
+				luma_cut = 2500000; // 2.5MHz
 				chroma_cut = 350000; // 350KHz
 				break;
 			case VHS_EP:
-				luma_cut = 2400000; // 2.4MHz
+				luma_cut = 2000000; // 2.0MHz
 				chroma_cut = 300000; // 300KHz
 				break;
 			default:
@@ -624,7 +624,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			for (x=0;x < dst->width;x++) {
 				s = Y[x];
 				for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
-				s += pre.highpass(s) * 3;
+				s += pre.highpass(s) * 2;
 				Y[x] = clampu8(s);
 			}
 		}
