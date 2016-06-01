@@ -595,6 +595,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -deemphasis <0|1>         Enable deepmhasis emulation\n");
 	fprintf(stderr," -nocolor-subcarrier       Emulate color subcarrier but do not decode back (debug)\n");
 	fprintf(stderr," -nocolor-subcarrier-after-yc-sep Emulate Y/C subcarrier separation but do not decode back (debug)\n");
+	fprintf(stderr," -subcarrier-amp <0...100> Subcarrier amplitude (0 to 100 percent of luma)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -613,6 +614,10 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+			}
+			else if (!strcmp(a,"subcarrier-amp")) {
+				int x = atoi(argv[i++]);
+				subcarrier_amplitude = x;
 			}
 			else if (!strcmp(a,"nocolor-subcarrier")) {
 				nocolor_subcarrier = true;
