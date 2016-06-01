@@ -417,6 +417,8 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				Y[1] = clampu8(Y[1] + ((((int)V[0] - 128) * subcarrier_amplitude) / 50));
 				Y[2] = clampu8(Y[2] - ((((int)U[1] - 128) * subcarrier_amplitude) / 50));
 				Y[3] = clampu8(Y[3] - ((((int)V[1] - 128) * subcarrier_amplitude) / 50));
+
+				U[0] = V[0] = U[1] = V[1] = 128;
 			}
 		}
 	}
@@ -1013,8 +1015,8 @@ int main(int argc,char **argv) {
 
 						if (output_avstream_video_input_frame != NULL) {
 							while (video_field < tgt_field) {
-								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL),video_field);
-								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL),video_field);
+								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
+								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
 								video_field++;
 							}
@@ -1089,8 +1091,8 @@ int main(int argc,char **argv) {
 								fprintf(stderr,"WARNING: sws_scale failed\n");
 
 							while (video_field < tgt_field) {
-								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL),video_field);
-								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL),video_field);
+								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
+								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
 								video_field++;
 							}
