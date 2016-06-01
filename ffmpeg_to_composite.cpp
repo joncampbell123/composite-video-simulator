@@ -266,6 +266,7 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+int		video_noise = 2;
 int		subcarrier_amplitude = 80;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
@@ -404,6 +405,21 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 
 				if (nocolor_subcarrier)
 					U[0] = V[0] = U[1] = V[1] = 128;
+			}
+		}
+	}
+
+	/* add video noise */
+	if (video_noise != 0) {
+		int noise = 0,noise_mod = (video_noise * 255) / 100;
+
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+
+			for (x=0;x < dst->width;x++) {
+				Y[x] = clampu8(Y[x] + noise);
+				noise += ((int)((unsigned int)rand() % ((video_noise*2)+1))) - video_noise;
+				noise /= 2;
 			}
 		}
 	}
@@ -596,6 +612,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -nocolor-subcarrier       Emulate color subcarrier but do not decode back (debug)\n");
 	fprintf(stderr," -nocolor-subcarrier-after-yc-sep Emulate Y/C subcarrier separation but do not decode back (debug)\n");
 	fprintf(stderr," -subcarrier-amp <0...100> Subcarrier amplitude (0 to 100 percent of luma)\n");
+	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -615,6 +632,10 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+			else if (!strcmp(a,"noise")) {
+				int x = atoi(argv[i++]);
+				video_noise = x;
+			}
 			else if (!strcmp(a,"subcarrier-amp")) {
 				int x = atoi(argv[i++]);
 				subcarrier_amplitude = x;
@@ -629,6 +650,7 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;
 				emulating_preemphasis = false; // no preemphasis by default
 				emulating_deemphasis = false; // no preemphasis by default
+				video_noise = 4; // VHS is a bit noisy
 			}
 			else if (!strcmp(a,"preemphasis")) {
 				int x = atoi(argv[i++]);
@@ -650,12 +672,15 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;			// implies -vhs
 				if (!strcmp(a,"ep")) {
 					output_vhs_tape_speed = VHS_EP;
+					video_noise = 6;
 				}
 				else if (!strcmp(a,"lp")) {
 					output_vhs_tape_speed = VHS_LP;
+					video_noise = 5;
 				}
 				else if (!strcmp(a,"sp")) {
 					output_vhs_tape_speed = VHS_SP;
+					video_noise = 4;
 				}
 				else {
 					fprintf(stderr,"Unknown vhs tape speed '%s'\n",a);
