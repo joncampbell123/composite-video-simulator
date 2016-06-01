@@ -340,8 +340,8 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"vhs")) {
 				emulating_vhs = true;
-				emulating_preemphasis = true;		// emulate preemphasis
-				emulating_deemphasis = true;		// emulate deemphasis
+				emulating_preemphasis = false; // no preemphasis by default
+				emulating_deemphasis = false; // no preemphasis by default
 			}
 			else if (!strcmp(a,"preemphasis")) {
 				int x = atoi(argv[i++]);
@@ -380,6 +380,10 @@ static int parse_argv(int argc,char **argv) {
 				output_vhs_hifi = (x > 0);
 				output_vhs_linear_audio = !output_vhs_hifi;
 				emulating_vhs = true;			// implies -vhs
+				if (output_vhs_hifi) {
+					emulating_preemphasis = true;
+					emulating_deemphasis = true;
+				}
 			}
 			else if (!strcmp(a,"tvstd")) {
 				a = argv[i++];
@@ -616,7 +620,7 @@ int main(int argc,char **argv) {
 	audio_hilopass.setChannels(output_audio_channels);
 	audio_hilopass.setRate(output_audio_rate);
 	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass); // hey, our filters aren't perfect
-	audio_hilopass.setPasses(8);
+	audio_hilopass.setPasses(6);
 	audio_hilopass.init();
 
 	// TODO: VHS Hi-Fi is also documented to use 2:1 companding when recording, which we do not yet emulate
@@ -624,24 +628,24 @@ int main(int argc,char **argv) {
 	if (emulating_preemphasis) {
 		if (output_vhs_hifi) {
 			for (unsigned int i=0;i < output_audio_channels;i++) {
-				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,20000/*FIXME: Guess! Also let user set this.*/);
+				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,16000/*FIXME: Guess! Also let user set this.*/);
 			}
 		}
 		else {
 			for (unsigned int i=0;i < output_audio_channels;i++) {
-				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
 			}
 		}
 	}
 	if (emulating_deemphasis) {
 		if (output_vhs_hifi) {
 			for (unsigned int i=0;i < output_audio_channels;i++) {
-				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,20000/*FIXME: Guess! Also let user set this.*/);
+				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,16000/*FIXME: Guess! Also let user set this.*/);
 			}
 		}
 		else {
 			for (unsigned int i=0;i < output_audio_channels;i++) {
-				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,10000/*FIXME: Guess! Also let user set this.*/);
+				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
 			}
 		}
 	}
