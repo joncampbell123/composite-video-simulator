@@ -256,6 +256,8 @@ AVStream*		output_avstream_audio = NULL;	// do not free
 AVCodecContext*		output_avstream_audio_codec_context = NULL; // do not free
 AVStream*		output_avstream_video = NULL;	// do not free
 AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
+AVFrame*		output_avstream_video_input_frame = NULL;
+AVFrame*		output_avstream_video_frame = NULL;
 
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
@@ -327,6 +329,109 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			audio[c] = clips16(s * 32768);
 		}
 	}
+}
+
+void composite_video_process(AVFrame *dst,unsigned int field) {
+}
+
+void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
+	unsigned int y,sy,sy2,syf;
+
+	// NTS: dst is 4:2:2 of output_width x output_height
+	//      src is 4:2:2 of output_width x source frame height
+	//
+	//      the reason we do that is so that swscale handles horizontal scaling, then we handle
+	//      vertical scaling in the way we need to in order to render interlaced video properly.
+	//
+	//      this code renders only one field or the other at a time.
+	for (y=field;y < dst->height;y += 2) {
+		sy = (y * 0x100 * src->height) / dst->height;
+		syf = sy & 0xFF;
+		sy >>= 8;
+
+		if (src->interlaced_frame) {
+			unsigned int which_field = src->top_field_first ? 0/*top*/ : 1/*bottom*/;
+			unsigned int src_pts = src->pkt_pts;
+			unsigned long long pts_delta = field_number - src_pts;
+
+			if (pts_delta >= ((unsigned long long)input_avstream_video_codec_context->ticks_per_frame / 2ULL))
+				which_field ^= 1;
+
+			if (which_field == 0) { // make it even. do not interpolate if first even line of the pair.
+				sy++; // but shift up the frame 1 line
+				if (!(sy & 1U)) syf = 0;
+				else sy--;
+			}
+			else {
+				if (!(sy & 1U)) { // make it odd. do not interpolate if first odd line of the pair.
+					syf = 0;
+					sy++;
+				}
+			}
+
+			if (sy >= (src->height - 2)) {
+				sy = src->height - 2;
+				syf = 0;
+			}
+			sy2 = sy + 2;
+		}
+		else {
+			if (sy >= (src->height - 1)) {
+				sy = src->height - 1;
+				syf = 0;
+			}
+			sy2 = sy + 1;
+		}
+
+		if (syf == 0) {
+			for (unsigned int p=0;p < 3;p++) {
+				unsigned char *s = src->data[p] + (src->linesize[p] * sy);
+				unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
+				memcpy(d,s,src->linesize[p]);
+			}
+		}
+		else {
+			for (unsigned int p=0;p < 3;p++) {
+				unsigned char *s1 = src->data[p] + (src->linesize[p] * sy);
+				unsigned char *s2 = src->data[p] + (src->linesize[p] * sy);
+				unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
+
+				for (unsigned int x=0;x < src->linesize[p];x++)
+					d[x] = s1[x] + ((unsigned char)((((int)s2[x] - (int)s1[x]) * (int)syf) >> (int)8));
+			}
+		}
+	}
+}
+
+void output_frame(AVFrame *frame,unsigned long long field_number) {
+	int gotit = 0;
+	AVPacket pkt;
+
+	av_init_packet(&pkt);
+	if (av_new_packet(&pkt,50000000/8) < 0) {
+		fprintf(stderr,"Failed to alloc vid packet\n");
+		return;
+	}
+
+	frame->interlaced_frame = 1;
+	frame->top_field_first = 0; // NTSC is bottom field first
+	frame->pts = field_number;
+	pkt.pts = field_number / 2ULL;
+	pkt.dts = field_number / 2ULL;
+	frame->key_frame = (field_number % (15ULL * 2ULL)) == 0 ? 1 : 0;
+
+	fprintf(stderr,"Output field %llu\n",field_number);
+	if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,frame,&gotit) == 0) {
+		if (gotit) {
+			pkt.stream_index = output_avstream_video->index;
+			av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+
+			if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
+				fprintf(stderr,"AV write frame failed video\n");
+		}
+	}
+
+	av_packet_unref(&pkt);
 }
 
 void preset_PAL() {
@@ -620,15 +725,18 @@ int main(int argc,char **argv) {
 			return 1;
 		}
 
+		// FIXME: How do I get FFMPEG to write raw YUV 4:2:2?
 		avcodec_get_context_defaults3(output_avstream_video_codec_context,avcodec_find_encoder(AV_CODEC_ID_H264));
 		output_avstream_video_codec_context->width = output_width;
 		output_avstream_video_codec_context->height = output_height;
 		output_avstream_video_codec_context->sample_aspect_ratio = (AVRational){output_height*4, output_width*3};
 		output_avstream_video_codec_context->pix_fmt = AV_PIX_FMT_YUV422P;
-		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, (output_field_rate.num/2)}; // NTS: divide by 2 to convert fields -> frames
+		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num}; // NTS: divide by 2 to convert fields -> frames
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
+		output_avstream_video_codec_context->ticks_per_frame = 2; // interlaced video
 		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
+		output_avstream_video->time_base.den /= 2; // interlaced video
 
 		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
 			output_avstream_video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -695,16 +803,36 @@ int main(int argc,char **argv) {
 		return 1;
 	}
 
-	/* prepare audio decoding */
+	/* prepare video decoding */
 	input_avstream_video_frame = av_frame_alloc();
 	if (input_avstream_video_frame == NULL) {
 		fprintf(stderr,"Failed to alloc video frame\n");
 		return 1;
 	}
 
+	/* prepare video encoding */
+	output_avstream_video_frame = av_frame_alloc();
+	if (output_avstream_video_frame == NULL) {
+		fprintf(stderr,"Failed to alloc video frame\n");
+		return 1;
+	}
+	av_frame_set_colorspace(output_avstream_video_frame,AVCOL_SPC_SMPTE170M);
+	av_frame_set_color_range(output_avstream_video_frame,AVCOL_RANGE_MPEG);
+	output_avstream_video_frame->format = output_avstream_video_codec_context->pix_fmt;
+	output_avstream_video_frame->height = output_height;
+	output_avstream_video_frame->width = output_width;
+	if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
+		fprintf(stderr,"Failed to alloc render frame\n");
+		return 1;
+	}
+
 	// PARSE
 	{
 		uint8_t **dst_data = NULL;
+		AVPixelFormat input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
+		int input_avstream_video_resampler_height = -1;
+		int input_avstream_video_resampler_width = -1;
+		unsigned long long video_field = 0;
 		int dst_data_alloc_samples = 0;
 		int dst_data_linesize = 0;
 		int dst_data_samples = 0;
@@ -773,6 +901,110 @@ int main(int argc,char **argv) {
 				}
 			}
 			else if (input_avstream_video != NULL && pkt.stream_index == input_avstream_video->index) {
+				av_packet_rescale_ts(&pkt,input_avstream_video->time_base,output_avstream_video_codec_context->time_base); // convert to FIELD number
+
+				if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
+					if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
+						unsigned long long tgt_field = input_avstream_video_frame->pkt_pts;
+						if (tgt_field == AV_NOPTS_VALUE) tgt_field = input_avstream_video_frame->pkt_dts;
+						if (tgt_field == AV_NOPTS_VALUE) tgt_field = pkt.dts;
+
+						if (output_avstream_video_input_frame != NULL) {
+							if (output_avstream_video_input_frame->height != input_avstream_video_frame->height) {
+								if (output_avstream_video_input_frame != NULL)
+									av_frame_free(&output_avstream_video_input_frame);
+							}
+						}
+
+						if (output_avstream_video_input_frame != NULL) {
+							while (video_field < tgt_field) {
+								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL),video_field);
+								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL));
+								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
+								video_field++;
+							}
+						}
+
+						if (output_avstream_video_input_frame == NULL) {
+							fprintf(stderr,"New input frame\n");
+							output_avstream_video_input_frame = av_frame_alloc();
+							if (output_avstream_video_input_frame == NULL) {
+								fprintf(stderr,"Failed to alloc video frame\n");
+								return 1;
+							}
+							av_frame_set_colorspace(output_avstream_video_input_frame,AVCOL_SPC_SMPTE170M);
+							av_frame_set_color_range(output_avstream_video_input_frame,AVCOL_RANGE_MPEG);
+							output_avstream_video_input_frame->format = output_avstream_video_codec_context->pix_fmt;
+							output_avstream_video_input_frame->height = input_avstream_video_frame->height;
+							output_avstream_video_input_frame->width = output_width;
+							if (av_frame_get_buffer(output_avstream_video_input_frame,64) < 0) {
+								fprintf(stderr,"Failed to alloc render frame\n");
+								return 1;
+							}
+						}
+
+						if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
+							if (input_avstream_video_resampler_format != input_avstream_video_frame->format ||
+								input_avstream_video_resampler_width != input_avstream_video_frame->width ||
+								input_avstream_video_resampler_height != input_avstream_video_frame->height) {
+								sws_freeContext(input_avstream_video_resampler);
+								input_avstream_video_resampler = NULL;
+							}
+						}
+
+						if (input_avstream_video_resampler == NULL) {
+							input_avstream_video_resampler = sws_getContext(
+								// source
+								input_avstream_video_frame->width,
+								input_avstream_video_frame->height,
+								(AVPixelFormat)input_avstream_video_frame->format,
+								// dest
+								output_avstream_video_codec_context->width,
+								input_avstream_video_frame->height,
+								output_avstream_video_codec_context->pix_fmt,
+								// opt
+								SWS_BILINEAR, NULL, NULL, NULL);
+
+							if (input_avstream_video_resampler != NULL) {
+								fprintf(stderr,"sws_getContext new context\n");
+								input_avstream_video_resampler_format = (AVPixelFormat)input_avstream_video_frame->format;
+								input_avstream_video_resampler_width = input_avstream_video_frame->width;
+								input_avstream_video_resampler_height = input_avstream_video_frame->height;
+							}
+							else {
+								fprintf(stderr,"sws_getContext fail\n");
+							}
+						}
+
+						if (input_avstream_video_resampler != NULL) {
+							output_avstream_video_input_frame->pts = input_avstream_video_frame->pts;
+							output_avstream_video_input_frame->pkt_pts = input_avstream_video_frame->pkt_pts;
+							output_avstream_video_input_frame->pkt_dts = input_avstream_video_frame->pkt_dts;
+							output_avstream_video_input_frame->top_field_first = input_avstream_video_frame->top_field_first;
+							output_avstream_video_input_frame->interlaced_frame = input_avstream_video_frame->interlaced_frame;
+
+							if (sws_scale(input_avstream_video_resampler,
+								// source
+								input_avstream_video_frame->data,
+								input_avstream_video_frame->linesize,
+								0,input_avstream_video_frame->height,
+								// dest
+								output_avstream_video_input_frame->data,
+								output_avstream_video_input_frame->linesize) <= 0)
+								fprintf(stderr,"WARNING: sws_scale failed\n");
+
+							while (video_field < tgt_field) {
+								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL),video_field);
+								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL));
+								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
+								video_field++;
+							}
+						}
+					}
+				}
+				else {
+					fprintf(stderr,"No video decoded\n");
+				}
 			}
 			else {
 			}
@@ -787,6 +1019,10 @@ int main(int argc,char **argv) {
 		}
 	}
 
+	if (output_avstream_video_input_frame != NULL)
+		av_frame_free(&output_avstream_video_input_frame);
+	if (output_avstream_video_frame != NULL)
+		av_frame_free(&output_avstream_video_frame);
 	if (input_avstream_video_frame != NULL)
 		av_frame_free(&input_avstream_video_frame);
 	if (input_avstream_audio_frame != NULL)
