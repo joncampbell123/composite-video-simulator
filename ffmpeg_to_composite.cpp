@@ -123,8 +123,8 @@ public:
 		cutoff = hz;
 		alpha = timeInterval / (tau + timeInterval);
 	}
-	void resetFilter() {
-		prev = 0;
+	void resetFilter(const double val=0) {
+		prev = val;
 	}
 	double lowpass(const double sample) {
 		const double stage1 = sample * alpha;
@@ -506,6 +506,79 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 
 	// NTS: At this point, the video best resembles what you'd get from a typical DVD player's composite video output.
 	//      Slightly blurry, some color artifacts, and edges will have that "buzz" effect, but still a good picture.
+
+	if (emulating_vhs) {
+		double luma_cut,chroma_cut;
+
+		switch (output_vhs_tape_speed) {
+			case VHS_SP:
+				luma_cut = 3000000; // 3.0MHz
+				chroma_cut = 400000; // 400KHz
+				break;
+			case VHS_LP:
+				luma_cut = 2250000; // 2.25MHz
+				chroma_cut = 380000; // 380KHz
+				break;
+			case VHS_EP:
+				luma_cut = 1500000; // 1.5MHz
+				chroma_cut = 360000; // 360KHz
+				break;
+			default:
+				abort();
+		};
+
+		// luma lowpass
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+			LowpassFilter lp[3];
+			LowpassFilter pre;
+			double s;
+
+			for (unsigned int f=0;f < 3;f++) {
+				lp[f].setFilter((315000000.00 * 4) / 88,luma_cut); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
+				lp[f].resetFilter(16);
+			}
+			pre.setFilter((315000000.00 * 4) / 88,luma_cut/3); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			pre.resetFilter(16);
+			for (x=0;x < dst->width;x++) {
+				s = Y[x];
+				for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+				s += pre.highpass(s);
+				Y[x] = clampu8(s);
+			}
+		}
+
+		// chroma lowpass
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+			LowpassFilter lpU[3],lpV[3];
+			LowpassFilter preU,preV;
+			double s;
+
+			for (unsigned int f=0;f < 3;f++) {
+				lpU[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+				lpU[f].resetFilter(128);
+				lpV[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+				lpV[f].resetFilter(128);
+			}
+			preU.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/3); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
+			preU.resetFilter(128);
+			preV.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/3); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
+			preV.resetFilter(128);
+			for (x=0;x < (dst->width/2);x++) {
+				s = U[x];
+				for (unsigned int f=0;f < 3;f++) s = lpU[f].lowpass(s);
+				s += preU.highpass(s);
+				if (x >= 4) U[x-4] = clampu8(s);
+
+				s = V[x];
+				for (unsigned int f=0;f < 3;f++) s = lpV[f].lowpass(s);
+				s += preV.highpass(s);
+				if (x >= 4) V[x-4] = clampu8(s);
+			}
+		}
+	}
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
