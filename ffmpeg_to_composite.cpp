@@ -293,6 +293,7 @@ bool		emulating_preemphasis = true;		// emulate preemphasis
 bool		emulating_deemphasis = true;		// emulate deemphasis
 bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
 bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
+bool		vhs_chroma_vert_blend = true;		// if set, and VHS, blend vertically the chroma scanlines (as the VHS format does)
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -578,6 +579,20 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				if (x >= 4) V[x-4] = clampu8(s);
 			}
 		}
+
+		// chroma vblend
+		if (vhs_chroma_vert_blend) {
+			for (unsigned int p=1;p <= 2;p++) {
+				for (y=field;y < (dst->height-2);y += 2) {
+					unsigned char *Y = dst->data[p] + (y * dst->linesize[p]);
+					unsigned char *Y2 = dst->data[p] + ((y+2) * dst->linesize[p]);
+
+					for (x=0;x < (dst->width/2);x++) {
+						Y[x] = (Y[x] + Y2[x] + 1) >> 1;
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -715,6 +730,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
 	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
 	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
+	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -736,6 +752,10 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"audio-hiss")) {
 				output_audio_hiss_db = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-chroma-vblend")) {
+				int x = atoi(argv[i++]);
+				vhs_chroma_vert_blend = (x > 0);
 			}
 			else if (!strcmp(a,"chroma-noise")) {
 				int x = atoi(argv[i++]);
