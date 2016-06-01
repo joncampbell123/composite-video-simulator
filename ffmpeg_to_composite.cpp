@@ -266,6 +266,7 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+int		video_chroma_noise = 0;
 int		video_noise = 2;
 int		subcarrier_amplitude = 80;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
@@ -477,6 +478,25 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 	}
 
+	/* add video noise */
+	if (video_chroma_noise != 0) {
+		int noiseU = 0,noiseV = 0,noise_mod = (video_chroma_noise * 255) / 100;
+
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+
+			for (x=0;x < (dst->width/2);x++) {
+				U[x] = clampu8(U[x] + noiseU);
+				V[x] = clampu8(V[x] + noiseV);
+				noiseU += ((int)((unsigned int)rand() % ((video_chroma_noise*2)+1))) - video_chroma_noise;
+				noiseU /= 2;
+				noiseV += ((int)((unsigned int)rand() % ((video_chroma_noise*2)+1))) - video_chroma_noise;
+				noiseV /= 2;
+			}
+		}
+	}
+
 	// NTS: At this point, the video best resembles what you'd get from a typical DVD player's composite video output.
 	//      Slightly blurry, some color artifacts, and edges will have that "buzz" effect, but still a good picture.
 }
@@ -613,6 +633,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -nocolor-subcarrier-after-yc-sep Emulate Y/C subcarrier separation but do not decode back (debug)\n");
 	fprintf(stderr," -subcarrier-amp <0...100> Subcarrier amplitude (0 to 100 percent of luma)\n");
 	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
+	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -632,6 +653,10 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+			else if (!strcmp(a,"chroma-noise")) {
+				int x = atoi(argv[i++]);
+				video_chroma_noise = x;
+			}
 			else if (!strcmp(a,"noise")) {
 				int x = atoi(argv[i++]);
 				video_noise = x;
@@ -650,6 +675,7 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;
 				emulating_preemphasis = false; // no preemphasis by default
 				emulating_deemphasis = false; // no preemphasis by default
+				video_chroma_noise = 4;
 				video_noise = 4; // VHS is a bit noisy
 			}
 			else if (!strcmp(a,"preemphasis")) {
@@ -672,14 +698,17 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;			// implies -vhs
 				if (!strcmp(a,"ep")) {
 					output_vhs_tape_speed = VHS_EP;
+					video_chroma_noise = 6;
 					video_noise = 6;
 				}
 				else if (!strcmp(a,"lp")) {
 					output_vhs_tape_speed = VHS_LP;
+					video_chroma_noise = 5;
 					video_noise = 5;
 				}
 				else if (!strcmp(a,"sp")) {
 					output_vhs_tape_speed = VHS_SP;
+					video_chroma_noise = 4;
 					video_noise = 4;
 				}
 				else {
