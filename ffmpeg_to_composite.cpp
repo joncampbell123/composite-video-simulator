@@ -597,12 +597,12 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				chroma_cut = 400000; // 400KHz
 				break;
 			case VHS_LP:
-				luma_cut = 2250000; // 2.25MHz
-				chroma_cut = 380000; // 380KHz
+				luma_cut = 2700000; // 2.7MHz
+				chroma_cut = 350000; // 350KHz
 				break;
 			case VHS_EP:
-				luma_cut = 1500000; // 1.5MHz
-				chroma_cut = 360000; // 360KHz
+				luma_cut = 2400000; // 2.4MHz
+				chroma_cut = 300000; // 300KHz
 				break;
 			default:
 				abort();
@@ -619,7 +619,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				lp[f].setFilter((315000000.00 * 4) / 88,luma_cut); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
 				lp[f].resetFilter(16);
 			}
-			pre.setFilter((315000000.00 * 4) / 88,luma_cut/3); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			pre.setFilter((315000000.00 * 4) / 88,luma_cut/4); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
 			pre.resetFilter(16);
 			for (x=0;x < dst->width;x++) {
 				s = Y[x];
@@ -643,9 +643,9 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				lpV[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
 				lpV[f].resetFilter(128);
 			}
-			preU.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/3); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
+			preU.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/4); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
 			preU.resetFilter(128);
-			preV.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/3); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
+			preV.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/4); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
 			preV.resetFilter(128);
 			for (x=0;x < (dst->width/2);x++) {
 				s = U[x];
