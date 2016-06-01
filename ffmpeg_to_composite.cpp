@@ -124,12 +124,23 @@ public:
 		for (size_t i=0;i < size();i++) sample = (*this)[i].hi.highpass(sample);
 		return sample;
 	}
+	void init(const unsigned int passes) {
+		clear();
+		resize(passes);
+		assert(size() >= passes);
+	}
 };
 
 class HiLoSample : public vector<HiLoPass> { // all passes, all channels of one sample period
 public:
 	HiLoSample() : vector() { }
 public:
+	void init(const unsigned int channels,const unsigned int passes) {
+		clear();
+		resize(channels);
+		assert(size() >= channels);
+		for (size_t i=0;i < size();i++) (*this)[i].init(passes);
+	}
 	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
 		for (size_t i=0;i < size();i++) (*this)[i].setFilter(rate,low_hz,high_hz);
 	}
@@ -172,7 +183,8 @@ public:
 	}
 	void init() {
 		clear();
-		if (channels == 0 || passes == 0 || rate == 0 || low_cutoff == 0 || high_cutoff) return;
+		if (channels == 0 || passes == 0 || rate == 0 || low_cutoff == 0 || high_cutoff == 0) return;
+		audiostate.init(channels,passes);
 		audiostate.setFilter(rate,low_cutoff,high_cutoff);
 	}
 public:
@@ -219,9 +231,33 @@ double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 //   VHS LP:    100Hz - 7KHz (right??)        (42dBFS S/N)
 //   VHS EP:    100Hz - 4KHz                  (42dBFS S/N)
 bool		output_vhs_hifi = true;
+bool		output_vhs_linear_stereo = false; // not common
 bool		output_vhs_linear_audio = false; // if true (non Hi-Fi) then we emulate hiss and noise of linear VHS tracks including the video sync pulses audible in the audio.
 
-void composite_audio_process(uint16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate
+enum {
+	VHS_SP=0,
+	VHS_LP,
+	VHS_EP
+};
+
+int		output_vhs_tape_speed = VHS_SP;
+
+static inline int clips16(const int x) {
+	if (x < -32768)
+		return -32768;
+	else if (x > 32767)
+		return 32767;
+
+	return x;
+}
+
+void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
+	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
+
+	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
+		for (unsigned int c=0;c < output_audio_channels;c++)
+			audio[c] = clips16((int)audio_hilopass.audiostate[c].filter((double)audio[c]));
+	}
 }
 
 void preset_PAL() {
@@ -247,6 +283,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -i <input file>\n");
 	fprintf(stderr," -o <output file>\n");
 	fprintf(stderr," -tvstd <pal|ntsc>\n");
+	fprintf(stderr," -vhs-hifi <0|1>    (default on)\n");
+	fprintf(stderr," -vhs-speed <ep|lp|sp>     (default sp)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -272,6 +310,28 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"o")) {
 				output_file = argv[i++];
 			}
+			else if (!strcmp(a,"vhs-speed")) {
+				a = argv[i++];
+
+				if (!strcmp(a,"ep")) {
+					output_vhs_tape_speed = VHS_EP;
+				}
+				else if (!strcmp(a,"lp")) {
+					output_vhs_tape_speed = VHS_LP;
+				}
+				else if (!strcmp(a,"ep")) {
+					output_vhs_tape_speed = VHS_EP;
+				}
+				else {
+					fprintf(stderr,"Unknown vhs tape speed '%s'\n",a);
+					return 1;
+				}
+			}
+			else if (!strcmp(a,"vhs-hifi")) {
+				int x = atoi(argv[i++]);
+				output_vhs_hifi = (x > 0);
+				output_vhs_linear_audio = !output_vhs_hifi;
+			}
 			else if (!strcmp(a,"tvstd")) {
 				a = argv[i++];
 
@@ -295,6 +355,33 @@ static int parse_argv(int argc,char **argv) {
 			fprintf(stderr,"Unhandled arg '%s'\n",a);
 			return 1;
 		}
+	}
+
+	if (output_vhs_hifi) {
+		output_audio_highpass = 20; // highpass to filter out below 20Hz
+		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
+		output_audio_channels = 2;
+	}
+	else if (output_vhs_linear_audio) {
+		switch (output_vhs_tape_speed) {
+			case VHS_SP:
+				output_audio_highpass = 100; // highpass to filter out below 100Hz
+				output_audio_lowpass = 10000; // lowpass to filter out above 10KHz
+				break;
+			case VHS_LP:
+				output_audio_highpass = 100; // highpass to filter out below 100Hz
+				output_audio_lowpass = 7000; // lowpass to filter out above 7KHz
+				break;
+			case VHS_EP:
+				output_audio_highpass = 100; // highpass to filter out below 100Hz
+				output_audio_lowpass = 4000; // lowpass to filter out above 4KHz
+				break;
+		}
+
+		if (!output_vhs_linear_stereo)
+			output_audio_channels = 1;
+		else
+			output_audio_channels = 2;
 	}
 
 	if (input_file.empty() || output_file.empty()) {
@@ -471,8 +558,8 @@ int main(int argc,char **argv) {
 	/* prepare audio filtering */
 	audio_hilopass.setChannels(output_audio_channels);
 	audio_hilopass.setRate(output_audio_rate);
-	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass);
-	audio_hilopass.setPasses(3);
+	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass); // hey, our filters aren't perfect
+	audio_hilopass.setPasses(8);
 	audio_hilopass.init();
 
 	/* prepare audio decoding */
@@ -533,7 +620,7 @@ int main(int argc,char **argv) {
 							if ((out_samples=swr_convert(input_avstream_audio_resampler,dst_data,dst_data_samples,
 								(const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
 								// PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
-								composite_audio_process((uint16_t*)dst_data[0],out_samples);
+								composite_audio_process((int16_t*)dst_data[0],out_samples);
 								// write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
 								// that way we can render directly to MP4 our VHS emulation.
 								AVPacket dstpkt;
