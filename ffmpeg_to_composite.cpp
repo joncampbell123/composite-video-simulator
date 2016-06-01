@@ -191,8 +191,11 @@ AVStream*		input_avstream_audio = NULL;	// do not free
 AVCodecContext*		input_avstream_audio_codec_context = NULL; // do not free
 AVStream*		input_avstream_video = NULL;	// do not free
 AVCodecContext*		input_avstream_video_codec_context = NULL; // do not free
+AVFrame*		input_avstream_audio_frame = NULL;
+AVFrame*		input_avstream_video_frame = NULL;
 
 struct SwrContext*	input_avstream_audio_resampler = NULL;
+struct SwsContext*	input_avstream_video_resampler = NULL;
 
 AVFormatContext*	output_avfmt = NULL;
 AVStream*		output_avstream_audio = NULL;	// do not free
@@ -217,6 +220,9 @@ double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 //   VHS EP:    100Hz - 4KHz                  (42dBFS S/N)
 bool		output_vhs_hifi = true;
 bool		output_vhs_linear_audio = false; // if true (non Hi-Fi) then we emulate hiss and noise of linear VHS tracks including the video sync pulses audible in the audio.
+
+void composite_audio_process(uint16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate
+}
 
 void preset_PAL() {
 	output_field_rate.num = 50;
@@ -469,8 +475,115 @@ int main(int argc,char **argv) {
 	audio_hilopass.setPasses(3);
 	audio_hilopass.init();
 
+	/* prepare audio decoding */
+	input_avstream_audio_frame = av_frame_alloc();
+	if (input_avstream_audio_frame == NULL) {
+		fprintf(stderr,"Failed to alloc audio frame\n");
+		return 1;
+	}
+
+	/* prepare audio decoding */
+	input_avstream_video_frame = av_frame_alloc();
+	if (input_avstream_video_frame == NULL) {
+		fprintf(stderr,"Failed to alloc video frame\n");
+		return 1;
+	}
+
+	// PARSE
+	{
+		uint8_t **dst_data = NULL;
+		int dst_data_alloc_samples = 0;
+		int dst_data_linesize = 0;
+		int dst_data_samples = 0;
+		int got_frame = 0;
+		AVPacket pkt;
+
+		av_init_packet(&pkt);
+		while (av_read_frame(input_avfmt,&pkt) >= 0) {
+			if (input_avstream_audio != NULL && pkt.stream_index == input_avstream_audio->index) {
+				av_packet_rescale_ts(&pkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
+				if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
+					if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
+						dst_data_samples = av_rescale_rnd(
+							swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
+							output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
+
+						if (dst_data == NULL || dst_data_samples > dst_data_alloc_samples) {
+							if (dst_data != NULL) {
+								av_freep(&dst_data[0]); // NTS: Why??
+								av_freep(&dst_data);
+							}
+
+							dst_data_alloc_samples = 0;
+							fprintf(stderr,"Allocating audio buffer %u samples\n",(unsigned int)dst_data_samples);
+							if (av_samples_alloc_array_and_samples(&dst_data,&dst_data_linesize,
+								output_avstream_audio_codec_context->channels,dst_data_samples,
+								output_avstream_audio_codec_context->sample_fmt, 0) >= 0) {
+								dst_data_alloc_samples = dst_data_samples;
+							}
+							else {
+								fprintf(stderr,"Failure to allocate audio buffer\n");
+								dst_data_alloc_samples = 0;
+							}
+						}
+
+						if (dst_data != NULL) {
+							int out_samples;
+
+							if ((out_samples=swr_convert(input_avstream_audio_resampler,dst_data,dst_data_samples,
+								(const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
+								// PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
+								composite_audio_process((uint16_t*)dst_data[0],out_samples);
+								// write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
+								// that way we can render directly to MP4 our VHS emulation.
+								AVPacket dstpkt;
+								av_init_packet(&dstpkt);
+								if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
+									assert(dstpkt.data != NULL);
+									assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
+									memcpy(dstpkt.data,dst_data[0],out_samples * 2 * output_audio_channels);
+								}
+								av_packet_copy_props(&dstpkt,&pkt);
+								dstpkt.stream_index = output_avstream_audio->index;
+								if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
+									fprintf(stderr,"Failed to write frame\n");
+								av_packet_unref(&dstpkt);
+							}
+							else if (out_samples < 0) {
+								fprintf(stderr,"Failed to resample audio\n");
+							}
+						}
+					}
+				}
+				else {
+					fprintf(stderr,"No audio decoded\n");
+				}
+			}
+			else if (input_avstream_video != NULL && pkt.stream_index == input_avstream_video->index) {
+			}
+			else {
+			}
+
+			av_packet_unref(&pkt);
+			av_init_packet(&pkt);
+		}
+
+		if (dst_data != NULL) {
+			av_freep(&dst_data[0]); // NTS: Why??
+			av_freep(&dst_data);
+		}
+	}
+
+	if (input_avstream_video_frame != NULL)
+		av_frame_free(&input_avstream_video_frame);
+	if (input_avstream_audio_frame != NULL)
+		av_frame_free(&input_avstream_audio_frame);
 	audio_hilopass.clear();
 	av_write_trailer(output_avfmt);
+	if (input_avstream_video_resampler != NULL) {
+		sws_freeContext(input_avstream_video_resampler);
+		input_avstream_video_resampler = NULL;
+	}
 	if (input_avstream_audio_resampler != NULL)
 		swr_free(&input_avstream_audio_resampler);
 	if (output_avfmt != NULL && !(output_avfmt->oformat->flags & AVFMT_NOFILE))
