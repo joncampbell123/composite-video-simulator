@@ -353,24 +353,6 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
 	unsigned int x,y;
 
-	{ /* lowpass the luma slightly */
-		for (y=field;y < dst->height;y += 2) {
-			unsigned char *s = dst->data[0] + (y * dst->linesize[0]);
-			unsigned char ppppc = 16,pppc = 16,ppc,pc,c;
-
-			ppc = s[0];
-			pc = s[1];
-			for (x=0;x < dst->width;x++) {
-				c = s[x+2];
-				s[x] = (ppppc + pppc + pppc + ppc + ppc + pc + pc + c + 3) >> 3;
-				ppppc = pppc;
-				pppc = ppc;
-				ppc = pc;
-				pc = c;
-			}
-		}
-	}
-
 	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
 		for (unsigned int p=1;p <= 2;p++) {
 			for (y=field;y < dst->height;y += 2) {
@@ -456,8 +438,31 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 					U[x/2] = V[x/2] = 128;
 				}
 			}
+
+			if (!nocolor_subcarrier_after_yc_sep) {
+				unsigned int xi = 0;
+				if (((fieldno^y)>>1)&1) xi = 2;
+
+				for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
+					chroma[x+2] = 255 - chroma[x+2];
+					chroma[x+3] = 255 - chroma[x+3];
+				}
+
+				for (x=0;x < dst->width;x++) {
+					chroma[x] = clampu8(((((int)chroma[x] - 128) * 50) / subcarrier_amplitude) + 128);
+				}
+
+				/* decode the color right back out from the subcarrier we generated */
+				for (x=0;x < (dst->width/2);x++) {
+					U[x] = 255 - chroma[(x*2)+0];
+					V[x] = 255 - chroma[(x*2)+1];
+				}
+			}
 		}
 	}
+
+	// NTS: At this point, the video best resembles what you'd get from a typical DVD player's composite video output.
+	//      Slightly blurry, some color artifacts, and edges will have that "buzz" effect, but still a good picture.
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
