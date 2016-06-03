@@ -335,13 +335,13 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 		unsigned int xc = dst->width;
 
 		if (output_ntsc) { // NTSC 2 color frames long
-			Y += fieldno & 3;
-			xc -= fieldno & 3;
+			Y += (fieldno + (y >> 1)) & 3;
+			xc -= (fieldno + (y >> 1)) & 3;
 		}
 		else/*PAL*/ {
-			//FIXME: I have no PAL monitor or video sources to confirm this. Is this right? PAL is 4 color frames long and inverts phase every other line?
-			Y += ((fieldno >> 1) + (y & 2)) & 3;
-			xc -= ((fieldno >> 1) + (y & 2)) & 3;
+			// FIXME: Is this right?
+			Y += (fieldno + y) & 3;
+			xc -= (fieldno + y) & 3;
 		}
 
 		/* remember: this code assumes 4:2:2 */
@@ -394,11 +394,11 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 			unsigned int xi = 0;
 
 			if (output_ntsc) { // NTSC 2 color frames long
-				xi += fieldno & 3;
+				xi = (fieldno + (y >> 1)) & 3;
 			}
 			else/*PAL*/ {
-				//FIXME: I have no PAL monitor or video sources to confirm this. Is this right? PAL is 4 color frames long and inverts phase every other line?
-				xi += ((fieldno >> 1) + (y & 2)) & 3;
+				// FIXME: Is this right?
+				xi = (fieldno + y) & 3;
 			}
 
 			for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
