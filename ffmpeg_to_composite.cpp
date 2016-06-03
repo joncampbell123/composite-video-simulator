@@ -625,23 +625,25 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		// phase line up per scanline (else summing the previous line's carrier would
 		// cancel it out).
 		if (vhs_chroma_vert_blend && output_ntsc) {
+			unsigned char delayU[dst->width/2];
+			unsigned char delayV[dst->width/2];
+
+			memset(delayU,128,dst->width/2);
+			memset(delayV,128,dst->width/2);
 			for (y=(field+2);y < dst->height;y += 2) {
-				unsigned char *UP = dst->data[1] + ((y-2) * dst->linesize[1]);
-				unsigned char *UC = dst->data[1] + (y * dst->linesize[1]);
-				unsigned char *VP = dst->data[2] + ((y-2) * dst->linesize[2]);
-				unsigned char *VC = dst->data[2] + (y * dst->linesize[2]);
+				unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+				unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+				unsigned char cU,cV;
 
 				for (x=0;x < (dst->width/2);x++) {
-					UC[x] = (UP[x] + UC[x] + 1) >> 1;
-					VC[x] = (VP[x] + VC[x] + 1) >> 1;
+					cU = U[x];
+					cV = V[x];
+					U[x] = (delayU[x]+cU+1)>>1;
+					V[x] = (delayV[x]+cV+1)>>1;
+					delayU[x] = cU;
+					delayV[x] = cV;
 				}
 			}
-
-			// the VCR demodulates the chroma + luma then combines them back together into
-			// a valid PAL/NTSC signal. if we want a realistic recreation of the luma+chroma
-			// crosstalk, then do the composite emulation again.
-			composite_video_yuv_to_ntsc(dst,field,fieldno);
-			composite_ntsc_to_yuv(dst,field,fieldno);
 		}
 	}
 }
