@@ -266,6 +266,7 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
 int		video_noise = 2;
 int		subcarrier_amplitude = 50;
@@ -333,9 +334,14 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 		unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
 		unsigned int xc = dst->width;
 
-		if (((fieldno^y)>>1)&1) {
-			Y += 2;
-			xc -= 2;
+		if (output_ntsc) { // NTSC 2 color frames long
+			Y += fieldno & 3;
+			xc -= fieldno & 3;
+		}
+		else/*PAL*/ {
+			//FIXME: I have no PAL monitor or video sources to confirm this. Is this right? PAL is 4 color frames long and inverts phase every other line?
+			Y += ((fieldno >> 1) + (y & 2)) & 3;
+			xc -= ((fieldno >> 1) + (y & 2)) & 3;
 		}
 
 		/* remember: this code assumes 4:2:2 */
@@ -386,7 +392,14 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 
 		if (!nocolor_subcarrier_after_yc_sep) {
 			unsigned int xi = 0;
-			if (((fieldno^y)>>1)&1) xi = 2;
+
+			if (output_ntsc) { // NTSC 2 color frames long
+				xi += fieldno & 3;
+			}
+			else/*PAL*/ {
+				//FIXME: I have no PAL monitor or video sources to confirm this. Is this right? PAL is 4 color frames long and inverts phase every other line?
+				xi += ((fieldno >> 1) + (y & 2)) & 3;
+			}
 
 			for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
 				chroma[x+2] = 255 - chroma[x+2];
@@ -398,9 +411,17 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 			}
 
 			/* decode the color right back out from the subcarrier we generated */
-			for (x=0;x < (dst->width/2);x++) {
-				U[x] = 255 - chroma[(x*2)+0];
-				V[x] = 255 - chroma[(x*2)+1];
+			if (xi & 1) {
+				for (x=0;x < (dst->width/2);x++) {
+					U[x] = 255 - chroma[(x*2)+1];
+					V[x] = 255 - chroma[(x*2)+0];
+				}
+			}
+			else {
+				for (x=0;x < (dst->width/2);x++) {
+					U[x] = 255 - chroma[(x*2)+0];
+					V[x] = 255 - chroma[(x*2)+1];
+				}
 			}
 		}
 	}
@@ -728,6 +749,7 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 void preset_PAL() {
 	output_field_rate.num = 50;
 	output_field_rate.den = 1;
+	video_color_fields = 8;
 	output_height = 576;
 	output_width = 720;
 	output_pal = true;
@@ -737,6 +759,7 @@ void preset_PAL() {
 void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
+	video_color_fields = 4;
 	output_height = 480;
 	output_width = 720;
 	output_pal = false;
