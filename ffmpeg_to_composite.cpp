@@ -679,6 +679,11 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				}
 			}
 		}
+
+#if 0 // TODO: Fix some issues with YUV -> subcarrier -> YUV emulation
+		composite_video_yuv_to_ntsc(dst,field,fieldno);
+		composite_ntsc_to_yuv(dst,field,fieldno);
+#endif
 	}
 }
 
