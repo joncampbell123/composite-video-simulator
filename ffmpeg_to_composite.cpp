@@ -425,6 +425,40 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 			}
 		}
 	}
+
+	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
+		for (unsigned int p=1;p <= 2;p++) {
+			for (y=field;y < dst->height;y += 2) {
+				unsigned char *P = dst->data[p] + (y * dst->linesize[p]);
+				LowpassFilter lp[3];
+				double cutoff;
+				int delay;
+				double s;
+
+				if (output_ntsc) {
+					// NTSC YIQ bandwidth: I=1.3MHz Q=0.6MHz
+					cutoff = (p == 1) ? 1300000 : 600000;
+					delay = (p == 1) ? 2 : 4;
+				}
+				else {
+					// PAL: R-Y and B-Y are 1.3MHz
+					cutoff = 1300000;
+					delay = 2;
+				}
+
+				for (unsigned int f=0;f < 3;f++) {
+					lp[f].setFilter((315000000.00 * 4) / (88 * 2),cutoff); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2)  vs 600KHz cutoff
+					lp[f].resetFilter(128);
+				}
+
+				for (x=0;x < (dst->width/2)/*4:2:2*/;x++) {
+					s = P[x];
+					for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+					if (x >= delay) P[x-delay] = clampu8(s);
+				}
+			}
+		}
+	}
 }
 
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
