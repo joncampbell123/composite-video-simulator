@@ -583,18 +583,18 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 
 		switch (output_vhs_tape_speed) {
 			case VHS_SP:
-				luma_cut = 3000000; // 3.0MHz
-				chroma_cut = 400000; // 400KHz
+				luma_cut = 2400000; // 3.0MHz x 80%
+				chroma_cut = 320000; // 400KHz x 80%
 				chroma_delay = 4;
 				break;
 			case VHS_LP:
-				luma_cut = 2500000; // 2.5MHz
-				chroma_cut = 350000; // 350KHz
+				luma_cut = 2000000; // 2.5MHz x 80%
+				chroma_cut = 300000; // 375KHz x 80%
 				chroma_delay = 5;
 				break;
 			case VHS_EP:
-				luma_cut = 2000000; // 2.0MHz
-				chroma_cut = 300000; // 300KHz
+				luma_cut = 1600000; // 2.0Mhz x 80%
+				chroma_cut = 280000; // 350KHz x 80%
 				chroma_delay = 6;
 				break;
 			default:
