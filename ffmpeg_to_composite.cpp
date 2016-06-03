@@ -624,7 +624,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		// note that phase changes in NTSC are compensated for by the VHS deck to make the
 		// phase line up per scanline (else summing the previous line's carrier would
 		// cancel it out).
-		if (vhs_chroma_vert_blend) {
+		if (vhs_chroma_vert_blend && output_ntsc) {
 			for (y=(field+2);y < dst->height;y += 2) {
 				unsigned char *UP = dst->data[1] + ((y-2) * dst->linesize[1]);
 				unsigned char *UC = dst->data[1] + (y * dst->linesize[1]);
