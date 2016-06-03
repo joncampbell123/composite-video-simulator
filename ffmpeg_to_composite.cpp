@@ -524,19 +524,23 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 
 	if (emulating_vhs) {
 		double luma_cut,chroma_cut;
+		int chroma_delay;
 
 		switch (output_vhs_tape_speed) {
 			case VHS_SP:
 				luma_cut = 3000000; // 3.0MHz
 				chroma_cut = 400000; // 400KHz
+				chroma_delay = 4;
 				break;
 			case VHS_LP:
 				luma_cut = 2500000; // 2.5MHz
 				chroma_cut = 350000; // 350KHz
+				chroma_delay = 5;
 				break;
 			case VHS_EP:
 				luma_cut = 2000000; // 2.0MHz
 				chroma_cut = 300000; // 300KHz
+				chroma_delay = 6;
 				break;
 			default:
 				abort();
@@ -585,12 +589,12 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				s = U[x];
 				for (unsigned int f=0;f < 3;f++) s = lpU[f].lowpass(s);
 				s += preU.highpass(s);
-				if (x >= 4) U[x-4] = clampu8(s);
+				if (x >= chroma_delay) U[x-chroma_delay] = clampu8(s);
 
 				s = V[x];
 				for (unsigned int f=0;f < 3;f++) s = lpV[f].lowpass(s);
 				s += preV.highpass(s);
-				if (x >= 4) V[x-4] = clampu8(s);
+				if (x >= chroma_delay) V[x-chroma_delay] = clampu8(s);
 			}
 		}
 
