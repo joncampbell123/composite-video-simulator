@@ -1034,7 +1034,10 @@ int main(int argc,char **argv) {
 					if (avcodec_open2(isctx,avcodec_find_decoder(isctx->codec_id),NULL) >= 0) {
 						input_avstream_audio = is;
 						input_avstream_audio_codec_context = isctx;
-						fprintf(stderr,"Found audio stream idx=%zu\n",i);
+						fprintf(stderr,"Found audio stream idx=%zu %u-channel %uHz\n",
+							i,
+							input_avstream_audio_codec_context->channels,
+							input_avstream_audio_codec_context->sample_rate);
 					}
 					else {
 						fprintf(stderr,"Found audio stream but not able to decode\n");
