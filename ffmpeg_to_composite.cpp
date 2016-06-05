@@ -335,6 +335,7 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 			for (y=field;y < dst->height;y += 2) {
 				unsigned char *P = dst->data[p] + (y * dst->linesize[p]);
 				LowpassFilter lp[3];
+				LowpassFilter hp;
 				double cutoff;
 				int delay;
 				double s;
@@ -350,6 +351,8 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 					delay = 2;
 				}
 
+				hp.setFilter((315000000.00 * 4) / (88 * 2),cutoff/2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2)  vs 600KHz cutoff
+				hp.resetFilter(128);
 				for (unsigned int f=0;f < 3;f++) {
 					lp[f].setFilter((315000000.00 * 4) / (88 * 2),cutoff); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2)  vs 600KHz cutoff
 					lp[f].resetFilter(128);
@@ -357,6 +360,7 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 
 				for (x=0;x < (dst->width/2)/*4:2:2*/;x++) {
 					s = P[x];
+					s += hp.highpass(s);
 					for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
 					if (x >= delay) P[x-delay] = clampu8(s);
 				}
