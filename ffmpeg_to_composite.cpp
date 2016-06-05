@@ -266,6 +266,9 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+double			vhs_out_sharpen = 1.25;
+double			vhs_out_sharpen_chroma = 0.8;
+
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
@@ -687,6 +690,50 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 					V[x] = (delayV[x]+cV+1)>>1;
 					delayU[x] = cU;
 					delayV[x] = cV;
+				}
+			}
+		}
+
+		// VHS decks tend to sharpen the picture on playback
+		if (true/*TODO make option*/) {
+			// luma
+			for (y=field;y < dst->height;y += 2) {
+				unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+				LowpassFilter lp[3];
+				double s,ts;
+
+				for (unsigned int f=0;f < 3;f++) {
+					lp[f].setFilter((315000000.00 * 4) / 88,luma_cut*2); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
+					lp[f].resetFilter(16);
+				}
+				for (x=0;x < dst->width;x++) {
+					s = ts = Y[x];
+					for (unsigned int f=0;f < 3;f++) ts = lp[f].lowpass(ts);
+					Y[x] = clampu8(s + ((s - ts) * vhs_out_sharpen));
+				}
+			}
+
+			// chroma
+			for (y=field;y < dst->height;y += 2) {
+				unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+				unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+				LowpassFilter lpU[3],lpV[3];
+				double s,ts;
+
+				for (unsigned int f=0;f < 3;f++) {
+					lpU[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut*2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+					lpU[f].resetFilter(128);
+					lpV[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut*2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+					lpV[f].resetFilter(128);
+				}
+				for (x=0;x < (dst->width/2);x++) {
+					s = ts = U[x];
+					for (unsigned int f=0;f < 3;f++) ts = lpU[f].lowpass(ts);
+					U[x] = clampu8(s + ((s - ts) * vhs_out_sharpen_chroma));
+
+					s = ts = V[x];
+					for (unsigned int f=0;f < 3;f++) ts = lpV[f].lowpass(ts);
+					V[x] = clampu8(s + ((s - ts) * vhs_out_sharpen_chroma));
 				}
 			}
 		}
