@@ -266,6 +266,7 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
 int		video_noise = 2;
@@ -686,6 +687,11 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			composite_ntsc_to_yuv(dst,field,fieldno);
 		}
 	}
+
+	for (int i=0;i < video_yc_recombine;i++) {
+		composite_video_yuv_to_ntsc(dst,field,fieldno);
+		composite_ntsc_to_yuv(dst,field,fieldno);
+	}
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
@@ -826,6 +832,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
 	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
 	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
+	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -844,6 +851,9 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+			}
+			else if (!strcmp(a,"yc-recomb")) {
+				video_yc_recombine = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"audio-hiss")) {
 				output_audio_hiss_db = atof(argv[i++]);
