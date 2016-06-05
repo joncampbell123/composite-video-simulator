@@ -266,8 +266,8 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
-double			vhs_out_sharpen = 1.25;
-double			vhs_out_sharpen_chroma = 0.8;
+double			vhs_out_sharpen = 1.5;
+double			vhs_out_sharpen_chroma = 0.85;
 
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
