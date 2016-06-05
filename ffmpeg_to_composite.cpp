@@ -331,31 +331,36 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 	unsigned int x,y;
 
 	for (y=field;y < dst->height;y += 2) {
+		static const int8_t Umult[4] = { 1, 0,-1, 0 };
+		static const int8_t Vmult[4] = { 0, 1, 0,-1 };
 		unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
 		unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
 		unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
 		unsigned int xc = dst->width;
+		unsigned int xi;
 
 		if (output_ntsc) { // NTSC 2 color frames long
-			Y += (fieldno + (y >> 1)) & 3;
-			xc -= (fieldno + (y >> 1)) & 3;
+			xi = (fieldno + (y >> 1)) & 3;
 		}
 		else/*PAL*/ {
 			// FIXME: Is this right?
-			Y += (fieldno + y) & 3;
-			xc -= (fieldno + y) & 3;
+			xi = (fieldno + y) & 3;
 		}
 
 		/* remember: this code assumes 4:2:2 */
 		/* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
-		for (x=0;x < xc;x += 4,Y += 4,U += 2,V += 2) {
-			Y[0] = clampu8(Y[0] + ((((int)U[0] - 128) * subcarrier_amplitude) / 50));
-			Y[1] = clampu8(Y[1] + ((((int)V[0] - 128) * subcarrier_amplitude) / 50));
-			Y[2] = clampu8(Y[2] - ((((int)U[1] - 128) * subcarrier_amplitude) / 50));
-			Y[3] = clampu8(Y[3] - ((((int)V[1] - 128) * subcarrier_amplitude) / 50));
+		for (x=0;x < xc;x += 2,Y += 2,U++,V++) {
+			for (unsigned int sx=0;sx < 2;sx++) {
+				unsigned int sxi = xi+x+sx;
+				int chroma;
+
+				chroma  = ((int)U[0] - 128) * subcarrier_amplitude * Umult[sxi&3];
+				chroma += ((int)V[0] - 128) * subcarrier_amplitude * Vmult[sxi&3];
+				Y[sx] = clampu8(Y[sx] + (chroma / 50));
+			}
 
 			if (nocolor_subcarrier)
-				U[0] = V[0] = U[1] = V[1] = 128;
+				U[0] = V[0] = 128;
 		}
 	}
 }
@@ -403,7 +408,7 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 				xi = (fieldno + y) & 3;
 			}
 
-			for (x=xi;x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
+			for (x=((4-xi)&3);x < dst->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
 				chroma[x+2] = 255 - chroma[x+2];
 				chroma[x+3] = 255 - chroma[x+3];
 			}
