@@ -295,6 +295,7 @@ bool		emulating_deemphasis = true;		// emulate deemphasis
 bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
 bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
 bool		vhs_chroma_vert_blend = true;		// if set, and VHS, blend vertically the chroma scanlines (as the VHS format does)
+bool		vhs_svideo_out = false;			// if not set, and VHS, video is recombined as if composite out on VCR
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -680,10 +681,10 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			}
 		}
 
-#if 0 // TODO: Fix some issues with YUV -> subcarrier -> YUV emulation
-		composite_video_yuv_to_ntsc(dst,field,fieldno);
-		composite_ntsc_to_yuv(dst,field,fieldno);
-#endif
+		if (!vhs_svideo_out) {
+			composite_video_yuv_to_ntsc(dst,field,fieldno);
+			composite_ntsc_to_yuv(dst,field,fieldno);
+		}
 	}
 }
 
@@ -824,6 +825,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
 	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
 	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
+	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -845,6 +847,10 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"audio-hiss")) {
 				output_audio_hiss_db = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-svideo")) {
+				int x = atoi(argv[i++]);
+				vhs_svideo_out = (x > 0);
 			}
 			else if (!strcmp(a,"vhs-chroma-vblend")) {
 				int x = atoi(argv[i++]);
