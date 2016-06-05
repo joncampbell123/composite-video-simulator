@@ -599,12 +599,12 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				chroma_delay = 4;
 				break;
 			case VHS_LP:
-				luma_cut = 2000000; // 2.5MHz x 80%
+				luma_cut = 1900000; // ..
 				chroma_cut = 300000; // 375KHz x 80%
 				chroma_delay = 5;
 				break;
 			case VHS_EP:
-				luma_cut = 1600000; // 2.0Mhz x 80%
+				luma_cut = 1400000; // ..
 				chroma_cut = 280000; // 350KHz x 80%
 				chroma_delay = 6;
 				break;
