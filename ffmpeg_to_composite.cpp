@@ -626,7 +626,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				lp[f].setFilter((315000000.00 * 4) / 88,luma_cut); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
 				lp[f].resetFilter(16);
 			}
-			pre.setFilter((315000000.00 * 4) / 88,luma_cut/2); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			pre.setFilter((315000000.00 * 4) / 88,luma_cut); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
 			pre.resetFilter(16);
 			for (x=0;x < dst->width;x++) {
 				s = Y[x];
@@ -650,9 +650,9 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				lpV[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
 				lpV[f].resetFilter(128);
 			}
-			preU.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
+			preU.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
 			preU.resetFilter(128);
-			preV.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut/2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
+			preV.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
 			preV.resetFilter(128);
 			for (x=0;x < (dst->width/2);x++) {
 				s = U[x];
