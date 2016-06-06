@@ -269,6 +269,9 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
+double			composite_preemphasis_cut = 1000000;
+
 double			vhs_out_sharpen = 1.5;
 double			vhs_out_sharpen_chroma = 0.85;
 
@@ -277,6 +280,7 @@ int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
 int		video_noise = 2;
 int		subcarrier_amplitude = 50;
+int		subcarrier_amplitude_back = 50;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
 int		output_height = 480;
@@ -458,7 +462,7 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 			}
 
 			for (x=0;x < dst->width;x++) {
-				chroma[x] = clampu8(((((int)chroma[x] - 128) * 50) / subcarrier_amplitude) + 128);
+				chroma[x] = clampu8(((((int)chroma[x] - 128) * 50) / subcarrier_amplitude_back) + 128);
 			}
 
 			/* decode the color right back out from the subcarrier we generated */
@@ -553,6 +557,23 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 	unsigned int x,y;
 
 	composite_video_yuv_to_ntsc(dst,field,fieldno);
+
+	/* video composite preemphasis */
+	if (composite_preemphasis != 0 && composite_preemphasis_cut > 0) {
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+			LowpassFilter pre;
+			double s;
+
+			pre.setFilter((315000000.00 * 4) / 88,composite_preemphasis_cut); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			pre.resetFilter(16);
+			for (x=0;x < dst->width;x++) {
+				s = Y[x];
+				s += pre.highpass(s) * composite_preemphasis;
+				Y[x] = clampu8(s);
+			}
+		}
+	}
 
 	/* add video noise */
 	if (video_noise != 0) {
@@ -887,6 +908,11 @@ static void help(const char *arg0) {
 	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
 	fprintf(stderr," -a <n>                    Pick the n'th audio stream\n");
 	fprintf(stderr," -v <n>                    Pick the n'th video stream\n");
+	fprintf(stderr," -comp-pre <s>             Composite preemphasis scale\n");
+	fprintf(stderr," -comp-cut <f>             Composite preemphasis freq\n");
+	fprintf(stderr," -comp-catv                Composite preemphasis preset, as if CATV #1\n");
+	fprintf(stderr," -comp-catv2               Composite preemphasis preset, as if CATV #2\n");
+	fprintf(stderr," -comp-catv3               Composite preemphasis preset, as if CATV #3\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -911,6 +937,24 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"v")) {
 				video_stream_index = atoi(argv[i++]);
+			}
+			else if (!strcmp(a,"comp-pre")) {
+				composite_preemphasis = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"comp-cut")) {
+				composite_preemphasis_cut = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"comp-catv")) {
+				composite_preemphasis = 1.5;
+				composite_preemphasis_cut = 315000000 / 88 / 2;
+			}
+			else if (!strcmp(a,"comp-catv2")) {
+				composite_preemphasis = 2.5;
+				composite_preemphasis_cut = 315000000 / 88 / 2;
+			}
+			else if (!strcmp(a,"comp-catv3")) {
+				composite_preemphasis = 4;
+				composite_preemphasis_cut = 315000000 / 88 / 2;
 			}
 			else if (!strcmp(a,"yc-recomb")) {
 				video_yc_recombine = atof(argv[i++]);
@@ -937,6 +981,7 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"subcarrier-amp")) {
 				int x = atoi(argv[i++]);
 				subcarrier_amplitude = x;
+				subcarrier_amplitude_back = x;
 			}
 			else if (!strcmp(a,"nocolor-subcarrier")) {
 				nocolor_subcarrier = true;
@@ -1063,6 +1108,9 @@ static int parse_argv(int argc,char **argv) {
 		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 		output_audio_channels = 2;
 	}
+
+	if (composite_preemphasis != 0)
+		subcarrier_amplitude_back += (50 * composite_preemphasis) / 16;
 
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 10000;
 
