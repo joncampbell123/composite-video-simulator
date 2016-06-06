@@ -521,16 +521,45 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 	}
 }
 
+static unsigned long long audio_proc_count = 0;
+
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
+	double linear_buzz = dBFS(output_audio_linear_buzz);
+	double hsync_hz = output_ntsc ? /*NTSC*/15734 : /*PAL*/15625;
+	int vsync_lines = output_ntsc ? /*NTSC*/525 : /*PAL*/625;
+	int vpulse_end = output_ntsc ? /*NTSC*/10 : /*PAL*/12;
+	double hpulse_end = output_ntsc ? /*NTSC*/(hsync_hz * (4.7/*us*/ / 1000000)) : /*PAL*/(hsync_hz * (4.0/*us*/ / 1000000));
 
 	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
 		for (unsigned int c=0;c < output_audio_channels;c++) {
 			double s;
 
 			s = (double)audio[c] / 32768;
+
+			/* that faint "buzzing" noise on linear tracks because of audio/video crosstalk */
+			if (!output_vhs_hifi && linear_buzz > 0.000000001) {
+				const unsigned int oversample = 16;
+				for (unsigned int oi=0;oi < oversample;oi++) {
+					double t = ((((double)audio_proc_count * oversample) + oi) * hsync_hz) / output_audio_rate / oversample;
+					double hpos = fmod(t,1.0);
+					int vline = (int)fmod(floor(t + 0.0001/*fudge*/ - hpos),(double)vsync_lines / 2);
+					bool pulse = false;
+
+					if (hpos < hpulse_end)
+						pulse = true; // HSYNC
+					if (vline < vpulse_end)
+						pulse = true; // VSYNC
+
+					if (pulse)
+						s -= linear_buzz / oversample / 2;
+				}
+			}
+
+			/* lowpass filter */
 			s = audio_hilopass.audiostate[c].filter(s);
 
+			/* preemphasis */
 			if (emulating_preemphasis) {
 				for (unsigned int i=0;i < output_audio_channels;i++) {
 					s = s + audio_linear_preemphasis_pre[i].highpass(s);
@@ -547,6 +576,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			if (output_audio_hiss_level != 0)
 				s += ((double)(((int)((unsigned int)rand() % ((output_audio_hiss_level * 2) + 1))) - output_audio_hiss_level)) / 20000;
 
+			/* deemphasis */
 			if (emulating_deemphasis) {
 				for (unsigned int i=0;i < output_audio_channels;i++) {
 					s = audio_linear_preemphasis_post[i].lowpass(s);
@@ -555,6 +585,8 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 
 			audio[c] = clips16(s * 32768);
 		}
+
+		audio_proc_count++;
 	}
 }
 
@@ -992,6 +1024,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
 	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
 	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
+	fprintf(stderr," -vhs-linear-video-crosstalk <x> Emulate video crosstalk in audio. Loudness in dBFS (0=100%)\n");
 	fprintf(stderr," -chroma-phase-noise <x>   Chroma phase noise (0...100)\n");
 	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
 	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
@@ -1065,6 +1098,9 @@ static int parse_argv(int argc,char **argv) {
 				composite_preemphasis = 4;
 				composite_preemphasis_cut = 315000000 / 88 / 2;
 				video_chroma_phase_noise = 6;
+			}
+			else if (!strcmp(a,"vhs-linear-video-crosstalk")) {
+				output_audio_linear_buzz = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"chroma-phase-noise")) {
 				int x = atoi(argv[i++]);
