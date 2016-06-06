@@ -1339,33 +1339,37 @@ int main(int argc,char **argv) {
 	}
 
 	/* prepare audio decoding */
-	input_avstream_audio_frame = av_frame_alloc();
-	if (input_avstream_audio_frame == NULL) {
-		fprintf(stderr,"Failed to alloc audio frame\n");
-		return 1;
+	if (input_avstream_audio != NULL) {
+		input_avstream_audio_frame = av_frame_alloc();
+		if (input_avstream_audio_frame == NULL) {
+			fprintf(stderr,"Failed to alloc audio frame\n");
+			return 1;
+		}
 	}
 
 	/* prepare video decoding */
-	input_avstream_video_frame = av_frame_alloc();
-	if (input_avstream_video_frame == NULL) {
-		fprintf(stderr,"Failed to alloc video frame\n");
-		return 1;
-	}
+	if (input_avstream_video != NULL) {
+		input_avstream_video_frame = av_frame_alloc();
+		if (input_avstream_video_frame == NULL) {
+			fprintf(stderr,"Failed to alloc video frame\n");
+			return 1;
+		}
 
-	/* prepare video encoding */
-	output_avstream_video_frame = av_frame_alloc();
-	if (output_avstream_video_frame == NULL) {
-		fprintf(stderr,"Failed to alloc video frame\n");
-		return 1;
-	}
-	av_frame_set_colorspace(output_avstream_video_frame,AVCOL_SPC_SMPTE170M);
-	av_frame_set_color_range(output_avstream_video_frame,AVCOL_RANGE_MPEG);
-	output_avstream_video_frame->format = output_avstream_video_codec_context->pix_fmt;
-	output_avstream_video_frame->height = output_height;
-	output_avstream_video_frame->width = output_width;
-	if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
-		fprintf(stderr,"Failed to alloc render frame\n");
-		return 1;
+		/* prepare video encoding */
+		output_avstream_video_frame = av_frame_alloc();
+		if (output_avstream_video_frame == NULL) {
+			fprintf(stderr,"Failed to alloc video frame\n");
+			return 1;
+		}
+		av_frame_set_colorspace(output_avstream_video_frame,AVCOL_SPC_SMPTE170M);
+		av_frame_set_color_range(output_avstream_video_frame,AVCOL_RANGE_MPEG);
+		output_avstream_video_frame->format = output_avstream_video_codec_context->pix_fmt;
+		output_avstream_video_frame->height = output_height;
+		output_avstream_video_frame->width = output_width;
+		if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
+			fprintf(stderr,"Failed to alloc render frame\n");
+			return 1;
+		}
 	}
 
 	// PARSE
