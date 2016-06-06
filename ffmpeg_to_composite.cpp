@@ -269,6 +269,8 @@ AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		output_avstream_video_input_frame = NULL;
 AVFrame*		output_avstream_video_frame = NULL;
 
+AVFrame*		output_avstream_video_bob_frame = NULL;
+
 double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
 double			composite_preemphasis_cut = 1000000;
 
@@ -281,6 +283,7 @@ int		video_chroma_noise = 0;
 int		video_noise = 2;
 int		subcarrier_amplitude = 50;
 int		subcarrier_amplitude_back = 50;
+bool		output_video_as_interlaced = false;	// render as 480i (half field rate). else, render at field rate with bob filter
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
 int		output_height = 480;
@@ -836,7 +839,7 @@ void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long lon
 	}
 }
 
-void output_frame(AVFrame *frame,unsigned long long field_number) {
+void output_frame(AVFrame *frame,unsigned long long field_number,unsigned int field) {
 	int gotit = 0;
 	AVPacket pkt;
 
@@ -846,21 +849,67 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 		return;
 	}
 
-	frame->interlaced_frame = 1;
-	frame->top_field_first = 0; // NTSC is bottom field first
-	frame->pts = field_number / 2ULL;
-	pkt.pts = field_number / 2ULL;
-	pkt.dts = field_number / 2ULL;
 	frame->key_frame = (field_number % (15ULL * 2ULL)) == 0 ? 1 : 0;
 
-	fprintf(stderr,"Output field %llu\n",field_number);
-	if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,frame,&gotit) == 0) {
-		if (gotit) {
-			pkt.stream_index = output_avstream_video->index;
-			av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+	if (output_video_as_interlaced) {
+		frame->interlaced_frame = 1;
+		frame->top_field_first = (field == 0)?1:0;
+		frame->pts = field_number / 2ULL;
+		pkt.pts = field_number / 2ULL;
+		pkt.dts = field_number / 2ULL;
+	}
+	else {
+		frame->interlaced_frame = 0;
+		frame->pts = field_number;
+		pkt.pts = field_number;
+		pkt.dts = field_number;
+	}
 
-			if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
-				fprintf(stderr,"AV write frame failed video\n");
+	fprintf(stderr,"Output field %llu\n",field_number);
+	if (output_video_as_interlaced) {
+		if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,frame,&gotit) == 0) {
+			if (gotit) {
+				pkt.stream_index = output_avstream_video->index;
+				av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+
+				if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
+					fprintf(stderr,"AV write frame failed video\n");
+			}
+		}
+	}
+	else {
+		output_avstream_video_bob_frame->interlaced_frame = frame->interlaced_frame;
+		output_avstream_video_bob_frame->top_field_first = frame->top_field_first;
+		output_avstream_video_bob_frame->pts = frame->pts;
+
+		assert(frame->height <= output_avstream_video_bob_frame->height);
+		assert(frame->width <= output_avstream_video_bob_frame->width);
+
+		for (unsigned int y=0;y < frame->height;y++) {
+			unsigned int sy;
+
+			if (field)
+				sy = (y|1); // 1, 1, 3, 3, 5, 5, ....
+			else
+				sy = (y+1)&(~1); // 0, 2, 2, 4, 4, 6, 6, ...
+
+			memcpy(output_avstream_video_bob_frame->data[0] + (output_avstream_video_bob_frame->linesize[0] * y),
+				frame->data[0] + (frame->linesize[0] * sy),frame->width);//luma
+
+			for (unsigned int p=1;p <= 2;p++) {
+				memcpy(output_avstream_video_bob_frame->data[p] + (output_avstream_video_bob_frame->linesize[p] * y),
+					frame->data[p] + (frame->linesize[p] * sy),frame->width/2);//chroma
+			}
+		}
+
+		if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,output_avstream_video_bob_frame,&gotit) == 0) {
+			if (gotit) {
+				pkt.stream_index = output_avstream_video->index;
+				av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+
+				if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
+					fprintf(stderr,"AV write frame failed video\n");
+			}
 		}
 	}
 
@@ -907,12 +956,16 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
 	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
 	fprintf(stderr," -a <n>                    Pick the n'th audio stream\n");
+	fprintf(stderr," -an                       Don't render any audio stream\n");
 	fprintf(stderr," -v <n>                    Pick the n'th video stream\n");
+	fprintf(stderr," -vn                       Don't render any video stream\n");
 	fprintf(stderr," -comp-pre <s>             Composite preemphasis scale\n");
 	fprintf(stderr," -comp-cut <f>             Composite preemphasis freq\n");
 	fprintf(stderr," -comp-catv                Composite preemphasis preset, as if CATV #1\n");
 	fprintf(stderr," -comp-catv2               Composite preemphasis preset, as if CATV #2\n");
 	fprintf(stderr," -comp-catv3               Composite preemphasis preset, as if CATV #3\n");
+	fprintf(stderr," -vi                       Render video at frame rate, interlaced\n");
+	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -937,6 +990,18 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"v")) {
 				video_stream_index = atoi(argv[i++]);
+			}
+			else if (!strcmp(a,"an")) {
+				audio_stream_index = -1;
+			}
+			else if (!strcmp(a,"vn")) {
+				video_stream_index = -1;
+			}
+			else if (!strcmp(a,"vi")) {
+				output_video_as_interlaced = true;
+			}
+			else if (!strcmp(a,"vp")) {
+				output_video_as_interlaced = false;
 			}
 			else if (!strcmp(a,"comp-pre")) {
 				composite_preemphasis = atof(argv[i++]);
@@ -1269,16 +1334,21 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->height = output_height;
 		output_avstream_video_codec_context->sample_aspect_ratio = (AVRational){output_height*4, output_width*3};
 		output_avstream_video_codec_context->pix_fmt = AV_PIX_FMT_YUV422P;
-		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, (output_field_rate.num/2)};
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
-		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
 
+		if (output_video_as_interlaced)
+			output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, (output_field_rate.num/2)};
+		else
+			output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num};
+
+		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
 		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
 			output_avstream_video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
 		// our output is interlaced
-		output_avstream_video_codec_context->flags |= CODEC_FLAG_INTERLACED_DCT;
+		if (output_video_as_interlaced)
+			output_avstream_video_codec_context->flags |= CODEC_FLAG_INTERLACED_DCT;
 
 		if (avcodec_open2(output_avstream_video_codec_context,avcodec_find_encoder(AV_CODEC_ID_H264),NULL) < 0) {
 			fprintf(stderr,"Output stream cannot open codec\n");
@@ -1369,6 +1439,23 @@ int main(int argc,char **argv) {
 		if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
 			fprintf(stderr,"Failed to alloc render frame\n");
 			return 1;
+		}
+
+		if (!output_video_as_interlaced) {
+			output_avstream_video_bob_frame = av_frame_alloc();
+			if (output_avstream_video_bob_frame == NULL) {
+				fprintf(stderr,"Failed to alloc video frame2\n");
+				return 1;
+			}
+			av_frame_set_colorspace(output_avstream_video_bob_frame,AVCOL_SPC_SMPTE170M);
+			av_frame_set_color_range(output_avstream_video_bob_frame,AVCOL_RANGE_MPEG);
+			output_avstream_video_bob_frame->format = output_avstream_video_codec_context->pix_fmt;
+			output_avstream_video_bob_frame->height = output_height;
+			output_avstream_video_bob_frame->width = output_width;
+			if (av_frame_get_buffer(output_avstream_video_bob_frame,64) < 0) {
+				fprintf(stderr,"Failed to alloc render frame2\n");
+				return 1;
+			}
 		}
 	}
 
@@ -1469,7 +1556,14 @@ int main(int argc,char **argv) {
 							while (video_field < tgt_field) {
 								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
-								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
+
+								if (output_video_as_interlaced) {
+									if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
+								}
+								else {
+									output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
+								}
+
 								video_field++;
 							}
 						}
@@ -1545,7 +1639,14 @@ int main(int argc,char **argv) {
 							while (video_field < tgt_field) {
 								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
-								if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL);
+
+								if (output_video_as_interlaced) {
+									if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
+								}
+								else {
+									output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
+								}
+
 								video_field++;
 							}
 						}
@@ -1568,6 +1669,8 @@ int main(int argc,char **argv) {
 
 	if (output_avstream_video_input_frame != NULL)
 		av_frame_free(&output_avstream_video_input_frame);
+	if (output_avstream_video_bob_frame != NULL)
+		av_frame_free(&output_avstream_video_bob_frame);
 	if (output_avstream_video_frame != NULL)
 		av_frame_free(&output_avstream_video_frame);
 	if (input_avstream_video_frame != NULL)
