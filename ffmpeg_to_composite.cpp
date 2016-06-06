@@ -82,6 +82,9 @@ void sigma(int x) {
 	if (++DIE >= 20) abort();
 }
 
+int		audio_stream_index = 0;
+int		video_stream_index = 0;
+
 string		input_file;
 string		output_file;
 
@@ -882,6 +885,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
 	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
 	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
+	fprintf(stderr," -a <n>                    Pick the n'th audio stream\n");
+	fprintf(stderr," -v <n>                    Pick the n'th video stream\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -900,6 +905,12 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+			}
+			else if (!strcmp(a,"a")) {
+				audio_stream_index = atoi(argv[i++]);
+			}
+			else if (!strcmp(a,"v")) {
+				video_stream_index = atoi(argv[i++]);
 			}
 			else if (!strcmp(a,"yc-recomb")) {
 				video_yc_recombine = atof(argv[i++]);
@@ -1084,6 +1095,7 @@ int main(int argc,char **argv) {
 	{
 		size_t i;
 		AVStream *is;
+		int ac=0,vc=0;
 		AVCodecContext *isctx;
 
 		fprintf(stderr,"Input format: %u streams found\n",input_avfmt->nb_streams);
@@ -1095,7 +1107,7 @@ int main(int argc,char **argv) {
 			if (isctx == NULL) continue;
 
 			if (isctx->codec_type == AVMEDIA_TYPE_AUDIO) {
-				if (input_avstream_audio == NULL) {
+				if (input_avstream_audio == NULL && ac == audio_stream_index) {
 					if (avcodec_open2(isctx,avcodec_find_decoder(isctx->codec_id),NULL) >= 0) {
 						input_avstream_audio = is;
 						input_avstream_audio_codec_context = isctx;
@@ -1108,16 +1120,22 @@ int main(int argc,char **argv) {
 						fprintf(stderr,"Found audio stream but not able to decode\n");
 					}
 				}
+
+				ac++;
 			}
 			else if (isctx->codec_type == AVMEDIA_TYPE_VIDEO) {
-				if (avcodec_open2(isctx,avcodec_find_decoder(isctx->codec_id),NULL) >= 0) {
-					input_avstream_video = is;
-					input_avstream_video_codec_context = isctx;
-					fprintf(stderr,"Found video stream idx=%zu\n",i);
+				if (input_avstream_video == NULL && vc == video_stream_index) {
+					if (avcodec_open2(isctx,avcodec_find_decoder(isctx->codec_id),NULL) >= 0) {
+						input_avstream_video = is;
+						input_avstream_video_codec_context = isctx;
+						fprintf(stderr,"Found video stream idx=%zu\n",i);
+					}
+					else {
+						fprintf(stderr,"Found video stream but not able to decode\n");
+					}
 				}
-				else {
-					fprintf(stderr,"Found video stream but not able to decode\n");
-				}
+
+				vc++;
 			}
 		}
 
