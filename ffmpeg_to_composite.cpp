@@ -280,6 +280,7 @@ double			vhs_out_sharpen_chroma = 0.85;
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
+int		video_chroma_phase_noise = 0;
 int		video_noise = 2;
 int		subcarrier_amplitude = 50;
 int		subcarrier_amplitude_back = 50;
@@ -340,7 +341,7 @@ static inline int clips16(const int x) {
 }
 
 /* render the chroma into the luma as a fake NTSC color subcarrier */
-void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
+void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long long fieldno,const int subcarrier_amplitude) {
 	unsigned int x,y;
 
 	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
@@ -417,7 +418,7 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 }
 
 /* filter subcarrier back out, use result to emulate NTSC luma-chroma artifacts */
-void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
+void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fieldno,const int subcarrier_amplitude_back) {
 	unsigned char chroma[dst->width]; // WARNING: This is more GCC-specific C++ than normal
 	unsigned int x,y;
 
@@ -559,7 +560,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
 	unsigned int x,y;
 
-	composite_video_yuv_to_ntsc(dst,field,fieldno);
+	composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
 
 	/* video composite preemphasis */
 	if (composite_preemphasis != 0 && composite_preemphasis_cut > 0) {
@@ -594,7 +595,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 	}
 
 	if (!nocolor_subcarrier)
-		composite_ntsc_to_yuv(dst,field,fieldno);
+		composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude_back);
 
 	/* add video noise */
 	if (video_chroma_noise != 0) {
@@ -611,6 +612,32 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				noiseU /= 2;
 				noiseV += ((int)((unsigned int)rand() % ((video_chroma_noise*2)+1))) - video_chroma_noise;
 				noiseV /= 2;
+			}
+		}
+	}
+	if (video_chroma_phase_noise != 0) {
+		int noise = 0,noise_mod = (video_chroma_noise * 255) / 100;
+		double pi,u,v,u_,v_;
+
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+
+			noise += ((int)((unsigned int)rand() % ((video_chroma_phase_noise*2)+1))) - video_chroma_phase_noise;
+			noise /= 2;
+			pi = ((double)noise * M_PI) / 100;
+
+			for (x=0;x < (dst->width/2);x++) {
+				u = (int)U[x] - 128; // think of 'u' as x-coord
+				v = (int)V[x] - 128; // and 'v' as y-coord
+
+				// then this 2D rotation then makes more sense
+				u_ = (u * cos(pi)) - (u * sin(pi));
+				v_ = (v * cos(pi)) + (v * sin(pi));
+
+				// put it back
+				U[x] = clampu8(u_ + 128);
+				V[x] = clampu8(v_ + 128);
 			}
 		}
 	}
@@ -759,14 +786,14 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 
 		if (!vhs_svideo_out) {
-			composite_video_yuv_to_ntsc(dst,field,fieldno);
-			composite_ntsc_to_yuv(dst,field,fieldno);
+			composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
+			composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude);
 		}
 	}
 
 	for (int i=0;i < video_yc_recombine;i++) {
-		composite_video_yuv_to_ntsc(dst,field,fieldno);
-		composite_ntsc_to_yuv(dst,field,fieldno);
+		composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
+		composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude);
 	}
 }
 
@@ -952,6 +979,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
 	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
 	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
+	fprintf(stderr," -chroma-phase-noise <x>   Chroma phase noise (0...100)\n");
 	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
 	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
 	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
@@ -1012,14 +1040,21 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"comp-catv")) {
 				composite_preemphasis = 1.5;
 				composite_preemphasis_cut = 315000000 / 88 / 2;
+				video_chroma_phase_noise = 2;
 			}
 			else if (!strcmp(a,"comp-catv2")) {
 				composite_preemphasis = 2.5;
 				composite_preemphasis_cut = 315000000 / 88 / 2;
+				video_chroma_phase_noise = 4;
 			}
 			else if (!strcmp(a,"comp-catv3")) {
 				composite_preemphasis = 4;
 				composite_preemphasis_cut = 315000000 / 88 / 2;
+				video_chroma_phase_noise = 6;
+			}
+			else if (!strcmp(a,"chroma-phase-noise")) {
+				int x = atoi(argv[i++]);
+				video_chroma_phase_noise = x;
 			}
 			else if (!strcmp(a,"yc-recomb")) {
 				video_yc_recombine = atof(argv[i++]);
@@ -1059,6 +1094,7 @@ static int parse_argv(int argc,char **argv) {
 				emulating_preemphasis = false; // no preemphasis by default
 				emulating_deemphasis = false; // no preemphasis by default
 				output_audio_hiss_db = -70;
+				video_chroma_phase_noise = 12;
 				video_chroma_noise = 16;
 				video_noise = 4; // VHS is a bit noisy
 			}
@@ -1082,16 +1118,19 @@ static int parse_argv(int argc,char **argv) {
 				emulating_vhs = true;			// implies -vhs
 				if (!strcmp(a,"ep")) {
 					output_vhs_tape_speed = VHS_EP;
+					video_chroma_phase_noise = 8;
 					video_chroma_noise = 22;
 					video_noise = 6;
 				}
 				else if (!strcmp(a,"lp")) {
 					output_vhs_tape_speed = VHS_LP;
+					video_chroma_phase_noise = 7;
 					video_chroma_noise = 19;
 					video_noise = 5;
 				}
 				else if (!strcmp(a,"sp")) {
 					output_vhs_tape_speed = VHS_SP;
+					video_chroma_phase_noise = 6;
 					video_chroma_noise = 16;
 					video_noise = 4;
 				}
@@ -1175,7 +1214,7 @@ static int parse_argv(int argc,char **argv) {
 	}
 
 	if (composite_preemphasis != 0)
-		subcarrier_amplitude_back += (50 * composite_preemphasis) / 16;
+		subcarrier_amplitude_back += (50 * composite_preemphasis) / 2;
 
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 10000;
 
