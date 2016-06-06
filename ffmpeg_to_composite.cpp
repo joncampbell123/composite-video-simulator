@@ -297,6 +297,7 @@ double		output_audio_hiss_db = -72;
 double		output_audio_linear_buzz = -42;	// how loud the "buzz" is audible in dBFS (S/N). Ever notice on old VHS tapes (prior to Hi-Fi) you can almost hear the video signal sync pulses in the audio?
 double		output_audio_highpass = 20; // highpass to filter out below 20Hz
 double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
+double		vhs_linear_high_boost = 0.25;
 // NTS:
 //   VHS Hi-Fi: 20Hz - 20KHz                  (70dBFS S/N)
 //   VHS SP:    100Hz - 10KHz                 (42dBFS S/N)
@@ -522,6 +523,7 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 }
 
 static unsigned long long audio_proc_count = 0;
+static LowpassFilter audio_post_vhs_boost[2];
 
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
@@ -575,6 +577,10 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			/* hiss */
 			if (output_audio_hiss_level != 0)
 				s += ((double)(((int)((unsigned int)rand() % ((output_audio_hiss_level * 2) + 1))) - output_audio_hiss_level)) / 20000;
+
+			/* some VCRs (at least mine) will boost higher frequencies if playing linear tracks */
+			if (!output_vhs_hifi && vhs_linear_high_boost > 0)
+				s += audio_post_vhs_boost[c].highpass(s) * vhs_linear_high_boost;
 
 			/* deemphasis */
 			if (emulating_deemphasis) {
@@ -1041,6 +1047,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vi                       Render video at frame rate, interlaced\n");
 	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
 	fprintf(stderr," -chroma-dropout <x>       Chroma scanline dropouts (0...10000)\n");
+	fprintf(stderr," -vhs-linear-high-boost <x> Boost high frequencies in VHS audio (linear tracks)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1077,6 +1084,9 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"vp")) {
 				output_video_as_interlaced = false;
+			}
+			else if (!strcmp(a,"vhs-linear-high-boost")) {
+				vhs_linear_high_boost = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"comp-pre")) {
 				composite_preemphasis = atof(argv[i++]);
@@ -1274,7 +1284,7 @@ static int parse_argv(int argc,char **argv) {
 	if (composite_preemphasis != 0)
 		subcarrier_amplitude_back += (50 * composite_preemphasis) / 2;
 
-	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 10000;
+	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
 
 	if (input_file.empty() || output_file.empty()) {
 		fprintf(stderr,"You must specify an input and output file (-i and -o).\n");
@@ -1477,6 +1487,10 @@ int main(int argc,char **argv) {
 	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass); // hey, our filters aren't perfect
 	audio_hilopass.setPasses(6);
 	audio_hilopass.init();
+
+	/* high boost on playback */
+	for (unsigned int i=0;i < 2;i++)
+		audio_post_vhs_boost[i].setFilter(output_audio_rate,10000);
 
 	// TODO: VHS Hi-Fi is also documented to use 2:1 companding when recording, which we do not yet emulate
 
