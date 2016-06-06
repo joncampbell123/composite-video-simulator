@@ -631,7 +631,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			for (x=0;x < dst->width;x++) {
 				s = Y[x];
 				for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
-				s += pre.highpass(s) * 2.5;
+				s += pre.highpass(s) * 1.6;
 				Y[x] = clampu8(s);
 			}
 		}
