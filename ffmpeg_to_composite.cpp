@@ -631,7 +631,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			for (x=0;x < dst->width;x++) {
 				s = Y[x];
 				for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
-				s += pre.highpass(s) * 2;
+				s += pre.highpass(s) * 2.5;
 				Y[x] = clampu8(s);
 			}
 		}
@@ -641,7 +641,6 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
 			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
 			LowpassFilter lpU[3],lpV[3];
-			LowpassFilter preU,preV;
 			double s;
 
 			for (unsigned int f=0;f < 3;f++) {
@@ -650,19 +649,13 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 				lpV[f].setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
 				lpV[f].resetFilter(128);
 			}
-			preU.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
-			preU.resetFilter(128);
-			preV.setFilter((315000000.00 * 4) / (88 * 2/*4:2:2*/),chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 125KHz cutoff
-			preV.resetFilter(128);
 			for (x=0;x < (dst->width/2);x++) {
 				s = U[x];
 				for (unsigned int f=0;f < 3;f++) s = lpU[f].lowpass(s);
-				s += preU.highpass(s);
 				if (x >= chroma_delay) U[x-chroma_delay] = clampu8(s);
 
 				s = V[x];
 				for (unsigned int f=0;f < 3;f++) s = lpV[f].lowpass(s);
-				s += preV.highpass(s);
 				if (x >= chroma_delay) V[x-chroma_delay] = clampu8(s);
 			}
 		}
