@@ -281,6 +281,7 @@ int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
 int		video_chroma_phase_noise = 0;
+int		video_chroma_loss = 0;
 int		video_noise = 2;
 int		subcarrier_amplitude = 50;
 int		subcarrier_amplitude_back = 50;
@@ -791,6 +792,18 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 	}
 
+	if (video_chroma_loss != 0) {
+		for (y=field;y < dst->height;y += 2) {
+			unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+			unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+
+			if ((((unsigned int)rand())%100000) < video_chroma_loss) {
+				memset(U,128,dst->width/2);
+				memset(V,128,dst->width/2);
+			}
+		}
+	}
+
 	for (int i=0;i < video_yc_recombine;i++) {
 		composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
 		composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude);
@@ -994,6 +1007,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -comp-catv3               Composite preemphasis preset, as if CATV #3\n");
 	fprintf(stderr," -vi                       Render video at frame rate, interlaced\n");
 	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
+	fprintf(stderr," -chroma-dropout <x>       Chroma scanline dropouts (0...10000)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1089,6 +1103,10 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"nocolor-subcarrier-after-yc-sep")) {
 				nocolor_subcarrier_after_yc_sep = true;
 			}
+			else if (!strcmp(a,"chroma-dropout")) {
+				int x = atoi(argv[i++]);
+				video_chroma_loss = x;
+			}
 			else if (!strcmp(a,"vhs")) {
 				emulating_vhs = true;
 				emulating_preemphasis = false; // no preemphasis by default
@@ -1096,6 +1114,7 @@ static int parse_argv(int argc,char **argv) {
 				output_audio_hiss_db = -70;
 				video_chroma_phase_noise = 12;
 				video_chroma_noise = 16;
+				video_chroma_loss = 4;
 				video_noise = 4; // VHS is a bit noisy
 			}
 			else if (!strcmp(a,"preemphasis")) {
@@ -1120,18 +1139,21 @@ static int parse_argv(int argc,char **argv) {
 					output_vhs_tape_speed = VHS_EP;
 					video_chroma_phase_noise = 8;
 					video_chroma_noise = 22;
+					video_chroma_loss = 8;
 					video_noise = 6;
 				}
 				else if (!strcmp(a,"lp")) {
 					output_vhs_tape_speed = VHS_LP;
 					video_chroma_phase_noise = 7;
 					video_chroma_noise = 19;
+					video_chroma_loss = 6;
 					video_noise = 5;
 				}
 				else if (!strcmp(a,"sp")) {
 					output_vhs_tape_speed = VHS_SP;
 					video_chroma_phase_noise = 6;
 					video_chroma_noise = 16;
+					video_chroma_loss = 4;
 					video_noise = 4;
 				}
 				else {
