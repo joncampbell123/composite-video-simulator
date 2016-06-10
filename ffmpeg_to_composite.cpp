@@ -277,6 +277,10 @@ double			composite_preemphasis_cut = 1000000;
 double			vhs_out_sharpen = 1.5;
 double			vhs_out_sharpen_chroma = 0.85;
 
+bool			vhs_head_switching = false;
+double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
+double			vhs_head_switching_phase_noise = (((1.0 / 300)/*slight error, like most VHS tapes*/) / 262.5); // 1/300th of a scanline
+
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
@@ -780,6 +784,89 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 			}
 		}
 
+		// VHS head switching noise
+		if (vhs_head_switching) {
+			unsigned int twidth = dst->width + (dst->width / 10);
+			unsigned int tx,x,p,x2,shy=0;
+			double noise = 0;
+			int shif,ishif,y;
+			double t;
+
+			if (vhs_head_switching_phase_noise != 0) {
+				unsigned int x = (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand();
+				x %= 2000000000U;
+				noise = ((double)x / 1000000000U) - 1.0;
+				noise *= vhs_head_switching_phase_noise;
+			}
+
+			if (output_ntsc)
+				t = twidth * 262.5;
+			else
+				t = twidth * 312.5;
+
+			p = (unsigned int)(fmod(vhs_head_switching_phase + noise,1.0) * t);
+			x = p % (unsigned int)twidth;
+			y = ((p / (unsigned int)twidth) * 2) + field;
+
+			if (output_ntsc)
+				y -= (262 - 240) * 2;
+			else
+				y -= (312 - 288) * 2;
+
+			tx = x;
+			if (x >= (twidth/2))
+				ishif = x - twidth;
+			else
+				ishif = x;
+
+			shif = 0;
+			while (y < dst->height) {
+				if (y >= 0) {
+					unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+					unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
+					unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
+
+					if (shif != 0) {
+						char tmp[twidth];
+						char tmp2[twidth];
+
+						/* WARNING: This is not 100% accurate. On real VHS you'd see the line shifted over and the next line's contents after hsync. */
+
+						/* luma */
+						x2 = (tx + twidth + (unsigned int)shif) % (unsigned int)twidth;
+						memset(tmp,16,sizeof(tmp));
+						memcpy(tmp,Y,dst->width);
+						for (x=tx;x < dst->width;x++) {
+							Y[x] = tmp[x2];
+							if ((++x2) == twidth) x2 = 0;
+						}
+
+						/* chroma */
+						x2 = (tx + twidth + (unsigned int)shif) % (unsigned int)twidth;
+						x2 >>= 1;
+						memset(tmp,128,sizeof(tmp));
+						memcpy(tmp,U,dst->width>>1);
+						memset(tmp2,128,sizeof(tmp));
+						memcpy(tmp2,V,dst->width>>1);
+						for (x=tx;x < (dst->width>>1);x++) {
+							U[x] = tmp[x2];
+							V[x] = tmp2[x2];
+							if ((++x2) == (twidth>>1)) x2 = 0;
+						}
+					}
+				}
+
+				if (shy == 0)
+					shif = ishif;
+				else
+					shif = (shif * 7) / 8;
+
+				tx = 0;
+				y += 2;
+				shy++;
+			}
+		}
+
 		// VHS decks tend to sharpen the picture on playback
 		if (true/*TODO make option*/) {
 			// luma
@@ -1048,6 +1135,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
 	fprintf(stderr," -chroma-dropout <x>       Chroma scanline dropouts (0...10000)\n");
 	fprintf(stderr," -vhs-linear-high-boost <x> Boost high frequencies in VHS audio (linear tracks)\n");
+	fprintf(stderr," -vhs-head-switching <0|1> Enable/disable VHS head switching emulation\n");
+	fprintf(stderr," -vhs-head-switching-point <x> Head switching point (0....1)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1084,6 +1173,13 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"vp")) {
 				output_video_as_interlaced = false;
+			}
+			else if (!strcmp(a,"vhs-head-switching-point")) {
+				vhs_head_switching_phase = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-head-switching")) {
+				int x = atoi(argv[i++]);
+				vhs_head_switching = (x > 0)?true:false;
 			}
 			else if (!strcmp(a,"vhs-linear-high-boost")) {
 				vhs_linear_high_boost = atof(argv[i++]);
@@ -1155,6 +1251,7 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"vhs")) {
 				emulating_vhs = true;
+				vhs_head_switching = true;
 				emulating_preemphasis = false; // no preemphasis by default
 				emulating_deemphasis = false; // no preemphasis by default
 				output_audio_hiss_db = -70;
@@ -1286,6 +1383,7 @@ static int parse_argv(int argc,char **argv) {
 
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
 
+	fprintf(stderr,"VHS head switching point: %.6f\n",vhs_head_switching_phase);
 	if (input_file.empty() || output_file.empty()) {
 		fprintf(stderr,"You must specify an input and output file (-i and -o).\n");
 		return 1;
