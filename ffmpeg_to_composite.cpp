@@ -1121,6 +1121,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-linear-high-boost <x> Boost high frequencies in VHS audio (linear tracks)\n");
 	fprintf(stderr," -vhs-head-switching <0|1> Enable/disable VHS head switching emulation\n");
 	fprintf(stderr," -vhs-head-switching-point <x> Head switching point (0....1)\n");
+	fprintf(stderr," -vhs-head-switching-noise-level <x> Head switching noise (variation)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1160,6 +1161,9 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"vhs-head-switching-point")) {
 				vhs_head_switching_phase = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-head-switching-noise-level")) {
+				vhs_head_switching_phase_noise = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"vhs-head-switching")) {
 				int x = atoi(argv[i++]);
@@ -1368,6 +1372,7 @@ static int parse_argv(int argc,char **argv) {
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
 
 	fprintf(stderr,"VHS head switching point: %.6f\n",vhs_head_switching_phase);
+	fprintf(stderr,"VHS head switching noise: %.6f\n",vhs_head_switching_phase_noise);
 	if (input_file.empty() || output_file.empty()) {
 		fprintf(stderr,"You must specify an input and output file (-i and -o).\n");
 		return 1;
