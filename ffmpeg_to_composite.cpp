@@ -637,6 +637,73 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 	}
 
+	// VHS head switching noise
+	if (vhs_head_switching) {
+		unsigned int twidth = dst->width + (dst->width / 10);
+		unsigned int tx,x,p,x2,shy=0;
+		double noise = 0;
+		int shif,ishif,y;
+		double t;
+
+		if (vhs_head_switching_phase_noise != 0) {
+			unsigned int x = (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand();
+			x %= 2000000000U;
+			noise = ((double)x / 1000000000U) - 1.0;
+			noise *= vhs_head_switching_phase_noise;
+		}
+
+		if (output_ntsc)
+			t = twidth * 262.5;
+		else
+			t = twidth * 312.5;
+
+		p = (unsigned int)(fmod(vhs_head_switching_phase + noise,1.0) * t);
+		x = p % (unsigned int)twidth;
+		y = ((p / (unsigned int)twidth) * 2) + field;
+
+		if (output_ntsc)
+			y -= (262 - 240) * 2;
+		else
+			y -= (312 - 288) * 2;
+
+		tx = x;
+		if (x >= (twidth/2))
+			ishif = x - twidth;
+		else
+			ishif = x;
+
+		shif = 0;
+		while (y < dst->height) {
+			if (y >= 0) {
+				unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
+
+				if (shif != 0) {
+					char tmp[twidth];
+
+					/* WARNING: This is not 100% accurate. On real VHS you'd see the line shifted over and the next line's contents after hsync. */
+
+					/* luma. the chroma subcarrier is there, so this is all we have to do. */
+					x2 = (tx + twidth + (unsigned int)shif) % (unsigned int)twidth;
+					memset(tmp,16,sizeof(tmp));
+					memcpy(tmp,Y,dst->width);
+					for (x=tx;x < dst->width;x++) {
+						Y[x] = tmp[x2];
+						if ((++x2) == twidth) x2 = 0;
+					}
+				}
+			}
+
+			if (shy == 0)
+				shif = ishif;
+			else
+				shif = (shif * 7) / 8;
+
+			tx = 0;
+			y += 2;
+			shy++;
+		}
+	}
+
 	if (!nocolor_subcarrier)
 		composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude_back);
 
@@ -781,89 +848,6 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 					delayU[x] = cU;
 					delayV[x] = cV;
 				}
-			}
-		}
-
-		// VHS head switching noise
-		if (vhs_head_switching) {
-			unsigned int twidth = dst->width + (dst->width / 10);
-			unsigned int tx,x,p,x2,shy=0;
-			double noise = 0;
-			int shif,ishif,y;
-			double t;
-
-			if (vhs_head_switching_phase_noise != 0) {
-				unsigned int x = (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand();
-				x %= 2000000000U;
-				noise = ((double)x / 1000000000U) - 1.0;
-				noise *= vhs_head_switching_phase_noise;
-			}
-
-			if (output_ntsc)
-				t = twidth * 262.5;
-			else
-				t = twidth * 312.5;
-
-			p = (unsigned int)(fmod(vhs_head_switching_phase + noise,1.0) * t);
-			x = p % (unsigned int)twidth;
-			y = ((p / (unsigned int)twidth) * 2) + field;
-
-			if (output_ntsc)
-				y -= (262 - 240) * 2;
-			else
-				y -= (312 - 288) * 2;
-
-			tx = x;
-			if (x >= (twidth/2))
-				ishif = x - twidth;
-			else
-				ishif = x;
-
-			shif = 0;
-			while (y < dst->height) {
-				if (y >= 0) {
-					unsigned char *Y = dst->data[0] + (y * dst->linesize[0]);
-					unsigned char *U = dst->data[1] + (y * dst->linesize[1]);
-					unsigned char *V = dst->data[2] + (y * dst->linesize[2]);
-
-					if (shif != 0) {
-						char tmp[twidth];
-						char tmp2[twidth];
-
-						/* WARNING: This is not 100% accurate. On real VHS you'd see the line shifted over and the next line's contents after hsync. */
-
-						/* luma */
-						x2 = (tx + twidth + (unsigned int)shif) % (unsigned int)twidth;
-						memset(tmp,16,sizeof(tmp));
-						memcpy(tmp,Y,dst->width);
-						for (x=tx;x < dst->width;x++) {
-							Y[x] = tmp[x2];
-							if ((++x2) == twidth) x2 = 0;
-						}
-
-						/* chroma */
-						x2 = (tx + twidth + (unsigned int)shif) % (unsigned int)twidth;
-						x2 >>= 1;
-						memset(tmp,128,sizeof(tmp));
-						memcpy(tmp,U,dst->width>>1);
-						memset(tmp2,128,sizeof(tmp));
-						memcpy(tmp2,V,dst->width>>1);
-						for (x=tx;x < (dst->width>>1);x++) {
-							U[x] = tmp[x2];
-							V[x] = tmp2[x2];
-							if ((++x2) == (twidth>>1)) x2 = 0;
-						}
-					}
-				}
-
-				if (shy == 0)
-					shif = ishif;
-				else
-					shif = (shif * 7) / 8;
-
-				tx = 0;
-				y += 2;
-				shy++;
 			}
 		}
 
