@@ -32,11 +32,11 @@ AC_FUNC_MEMCMP
 AC_CHECK_FUNCS([memset])
 
 # FFMPEG
-ISP_PKG_CHECK(AVCODEC,				libavcodec >= 55.39.101)
-ISP_PKG_CHECK(AVFORMAT,				libavformat >= 55.19.104)
-ISP_PKG_CHECK(SWSCALE,				libswscale >= 4.0.100)
-ISP_PKG_CHECK(AVUTIL,				libavutil >= 52.48.101)
-ISP_PKG_CHECK(SWRESAMPLE,			libswresample >= 2.0.101)
+PKG_CHECK_MODULES([AVCODEC],        [libavcodec >= 55.39.101])
+PKG_CHECK_MODULES([AVFORMAT],       [libavformat >= 55.19.104])
+PKG_CHECK_MODULES([SWSCALE],        [libswscale >= 4.0.100])
+PKG_CHECK_MODULES([AVUTIL],         [libavutil >= 52.48.101])
+PKG_CHECK_MODULES([SWRESAMPLE],     [libswresample >= 2.0.101])
 
 # variables for multi-target
 AM_CONDITIONAL(WIN32,false)
