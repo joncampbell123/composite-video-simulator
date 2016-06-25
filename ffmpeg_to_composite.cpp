@@ -902,7 +902,7 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 	}
 }
 
-void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
+void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number,signed long long src_pts) {
 	unsigned int y,sy,sy2,syf,csy,csy2,csyf;
     unsigned int chroma_height;
 
@@ -934,7 +934,6 @@ void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long lon
 
 		if (src->interlaced_frame) {
 			unsigned int which_field = src->top_field_first ? 0/*top*/ : 1/*bottom*/;
-			unsigned int src_pts = src->pkt_pts;
 			unsigned long long pts_delta = field_number - src_pts;
 
 			if (pts_delta >= ((unsigned long long)input_avstream_video_codec_context->ticks_per_frame / 2ULL))
@@ -1843,9 +1842,18 @@ int main(int argc,char **argv) {
 				if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
 					if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
 						unsigned long long tgt_field = input_avstream_video_frame->pkt_pts;
-						if (tgt_field == AV_NOPTS_VALUE) tgt_field = input_avstream_video_frame->pkt_dts;
-						if (tgt_field == AV_NOPTS_VALUE) tgt_field = pkt.dts;
 
+                        if (tgt_field == AV_NOPTS_VALUE)
+                            tgt_field = video_field; // don't want me to guess? give me PTS timestamps then!
+                        else {
+                            // deal with imperfections, prevent them from making an unstable frame rate
+                            signed long long d = (signed long long)tgt_field - (signed long long)video_field;
+
+                            if (llabs(d) < 4 && tgt_field < video_field)
+                                tgt_field = video_field;
+                        }
+
+                        unsigned long long tgt_pts = tgt_field;
                         if (pkt.duration > 0)
                             tgt_field += pkt.duration;
 
@@ -1939,7 +1947,7 @@ int main(int argc,char **argv) {
 								fprintf(stderr,"WARNING: sws_scale failed\n");
 
 							while (video_field < tgt_field) {
-								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
+								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field,tgt_pts);
 								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 
 								if (output_video_as_interlaced) {
