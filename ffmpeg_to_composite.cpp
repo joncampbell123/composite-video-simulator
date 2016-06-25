@@ -245,10 +245,12 @@ AVStream*		output_avstream_audio = NULL;	// do not free
 AVCodecContext*		output_avstream_audio_codec_context = NULL; // do not free
 AVStream*		output_avstream_video = NULL;	// do not free
 AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
-AVFrame*		output_avstream_video_input_frame = NULL;
-AVFrame*		output_avstream_video_frame = NULL;
+AVFrame*		output_avstream_video_input_frame = NULL;   // 4:2:2
+AVFrame*		output_avstream_video_frame = NULL;         // 4:2:2
 
-AVFrame*		output_avstream_video_bob_frame = NULL;
+AVFrame*		output_avstream_video_bob_frame = NULL;     // 4:2:0 or 4:2:2
+
+bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
 
 double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
 double			composite_preemphasis_cut = 1000000;
@@ -899,10 +901,18 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number) {
-	unsigned int y,sy,sy2,syf;
+	unsigned int y,sy,sy2,syf,csy,csy2,csyf;
+    unsigned int chroma_height;
+
+    if (output_avstream_video_input_frame->format == AV_PIX_FMT_YUV420P)
+        chroma_height = src->height >> 1;
+    else
+        chroma_height = src->height;
 
 	// NTS: dst is 4:2:2 of output_width x output_height
 	//      src is 4:2:2 of output_width x source frame height
+    //
+    //      if the video source is 4:2:0 then src is 4:2:0
 	//
 	//      the reason we do that is so that swscale handles horizontal scaling, then we handle
 	//      vertical scaling in the way we need to in order to render interlaced video properly.
@@ -912,6 +922,13 @@ void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long lon
 		sy = (y * 0x100 * src->height) / dst->height;
 		syf = sy & 0xFF;
 		sy >>= 8;
+
+        csy = sy;
+        csyf = syf;
+        if (output_avstream_video_input_frame->format == AV_PIX_FMT_YUV420P) {
+            if (!(csy&1)) csyf = 0;
+            csy >>= 1;
+        }
 
 		if (src->interlaced_frame) {
 			unsigned int which_field = src->top_field_first ? 0/*top*/ : 1/*bottom*/;
@@ -933,11 +950,29 @@ void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long lon
 				}
 			}
 
+			if (which_field == 0) { // make it even. do not interpolate if first even line of the pair.
+				csy++; // but shift up the frame 1 line
+				if (!(csy & 1U)) csyf = 0;
+				else csy--;
+			}
+			else {
+				if (!(csy & 1U)) { // make it odd. do not interpolate if first odd line of the pair.
+					csyf = 0;
+					csy++;
+				}
+			}
+
 			if (sy >= (src->height - 2)) {
 				sy = src->height - 2;
 				syf = 0;
 			}
 			sy2 = sy + 2;
+
+			if (csy >= (chroma_height - 2)) {
+				csy = chroma_height - 2;
+				csyf = 0;
+			}
+			csy2 = csy + 1;
 		}
 		else {
 			if (sy >= (src->height - 1)) {
@@ -945,25 +980,54 @@ void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long lon
 				syf = 0;
 			}
 			sy2 = sy + 1;
+
+			if (csy >= (chroma_height - 1)) {
+				csy = chroma_height - 1;
+				csyf = 0;
+			}
+			csy2 = csy + 1;
 		}
 
-		if (syf == 0) {
-			for (unsigned int p=0;p < 3;p++) {
-				unsigned char *s = src->data[p] + (src->linesize[p] * sy);
-				unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
-				memcpy(d,s,src->linesize[p]);
-			}
-		}
-		else {
-			for (unsigned int p=0;p < 3;p++) {
-				unsigned char *s1 = src->data[p] + (src->linesize[p] * sy);
-				unsigned char *s2 = src->data[p] + (src->linesize[p] * sy2);
-				unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
+        if (output_avstream_video_input_frame->format == AV_PIX_FMT_YUV420P) {
+            for (unsigned int p=0;p < 3;p++) {
+                unsigned char *s1 = src->data[p] + (src->linesize[p] * sy);
+                unsigned char *s2 = src->data[p] + (src->linesize[p] * sy2);
+                unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
 
-				for (unsigned int x=0;x < src->linesize[p];x++)
-					d[x] = s1[x] + ((unsigned char)((((int)s2[x] - (int)s1[x]) * (int)syf) >> (int)8));
-			}
-		}
+                if (syf == 0) {
+                    memcpy(d,s1,src->linesize[p]);
+                }
+                else {
+                    for (unsigned int x=0;x < src->linesize[p];x++)
+                        d[x] = s1[x] + ((unsigned char)((((int)s2[x] - (int)s1[x]) * (int)syf) >> (int)8));
+                }
+
+                if (p == 0) {
+                    sy = csy;
+                    sy2 = csy2;
+                    syf = csyf;
+                }
+            }
+        }
+        else {
+            if (syf == 0) {
+                for (unsigned int p=0;p < 3;p++) {
+                    unsigned char *s = src->data[p] + (src->linesize[p] * sy);
+                    unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
+                    memcpy(d,s,src->linesize[p]);
+                }
+            }
+            else {
+                for (unsigned int p=0;p < 3;p++) {
+                    unsigned char *s1 = src->data[p] + (src->linesize[p] * sy);
+                    unsigned char *s2 = src->data[p] + (src->linesize[p] * sy2);
+                    unsigned char *d = dst->data[p] + (dst->linesize[p] * y);
+
+                    for (unsigned int x=0;x < src->linesize[p];x++)
+                        d[x] = s1[x] + ((unsigned char)((((int)s2[x] - (int)s1[x]) * (int)syf) >> (int)8));
+                }
+            }
+        }
 	}
 }
 
@@ -994,17 +1058,17 @@ void output_frame(AVFrame *frame,unsigned long long field_number,unsigned int fi
 	}
 
 	fprintf(stderr,"Output field %llu\n",field_number);
-	if (output_video_as_interlaced) {
-		if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,frame,&gotit) == 0) {
-			if (gotit) {
-				pkt.stream_index = output_avstream_video->index;
-				av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+	if (output_video_as_interlaced && use_422_colorspace) { // 4:2:2 interlaced = use as-is
+        if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,frame,&gotit) == 0) {
+            if (gotit) {
+                pkt.stream_index = output_avstream_video->index;
+                av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
 
-				if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
-					fprintf(stderr,"AV write frame failed video\n");
-			}
-		}
-	}
+                if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
+                    fprintf(stderr,"AV write frame failed video\n");
+            }
+        }
+    }
 	else {
 		output_avstream_video_bob_frame->interlaced_frame = frame->interlaced_frame;
 		output_avstream_video_bob_frame->top_field_first = frame->top_field_first;
@@ -1013,25 +1077,66 @@ void output_frame(AVFrame *frame,unsigned long long field_number,unsigned int fi
 		assert(frame->height <= output_avstream_video_bob_frame->height);
 		assert(frame->width <= output_avstream_video_bob_frame->width);
 
-		for (unsigned int y=0;y < frame->height;y++) {
-			unsigned int sy;
+        if (use_422_colorspace) {
+            for (unsigned int y=0;y < frame->height;y++) {
+                unsigned int sy;
 
-			if (field)
-				sy = (y|1); // 1, 1, 3, 3, 5, 5, ....
-			else
-				sy = (y+1)&(~1); // 0, 2, 2, 4, 4, 6, 6, ...
+                if (field)
+                    sy = (y|1); // 1, 1, 3, 3, 5, 5, ....
+                else
+                    sy = (y+1)&(~1); // 0, 2, 2, 4, 4, 6, 6, ...
 
-            if (sy >= frame->height)
-                sy -= 2;
+                if (sy >= frame->height)
+                    sy -= 2;
 
-			memcpy(output_avstream_video_bob_frame->data[0] + (output_avstream_video_bob_frame->linesize[0] * y),
-				frame->data[0] + (frame->linesize[0] * sy),frame->width);//luma
+                memcpy(output_avstream_video_bob_frame->data[0] + (output_avstream_video_bob_frame->linesize[0] * y),
+                        frame->data[0] + (frame->linesize[0] * sy),frame->width);//luma
 
-			for (unsigned int p=1;p <= 2;p++) {
-				memcpy(output_avstream_video_bob_frame->data[p] + (output_avstream_video_bob_frame->linesize[p] * y),
-					frame->data[p] + (frame->linesize[p] * sy),frame->width/2);//chroma
-			}
-		}
+                for (unsigned int p=1;p <= 2;p++) {
+                    memcpy(output_avstream_video_bob_frame->data[p] + (output_avstream_video_bob_frame->linesize[p] * y),
+                            frame->data[p] + (frame->linesize[p] * sy),frame->width/2);//chroma
+                }
+            }
+        }
+        else { // 4:2:0
+            for (unsigned int y=0;y < frame->height;y++) {
+                unsigned int sy;
+
+                if (output_video_as_interlaced)
+                    sy = y;
+                else if (field)
+                    sy = (y|1); // 1, 1, 3, 3, 5, 5, ....
+                else
+                    sy = (y+1)&(~1); // 0, 2, 2, 4, 4, 6, 6, ...
+
+                if (sy >= frame->height)
+                    sy -= 2;
+
+                memcpy(output_avstream_video_bob_frame->data[0] + (output_avstream_video_bob_frame->linesize[0] * y),
+                        frame->data[0] + (frame->linesize[0] * sy),frame->width);//luma
+
+                if (output_video_as_interlaced) {
+                    if ((y&2) == 0) {
+                        unsigned int cy = (y & 1) + ((y & (~3)) >> 1);
+
+                        for (unsigned int p=1;p <= 2;p++) {
+                            memcpy(output_avstream_video_bob_frame->data[p] + (output_avstream_video_bob_frame->linesize[p] * cy),
+                                    frame->data[p] + (frame->linesize[p] * sy),frame->width/2);//chroma
+                        }
+                    }
+                }
+                else {
+                    if ((y&1) == 0) {
+                        unsigned int cy = y >> 1;
+
+                        for (unsigned int p=1;p <= 2;p++) {
+                            memcpy(output_avstream_video_bob_frame->data[p] + (output_avstream_video_bob_frame->linesize[p] * cy),
+                                    frame->data[p] + (frame->linesize[p] * sy),frame->width/2);//chroma
+                        }
+                    }
+                }
+            }
+        }
 
 		if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,output_avstream_video_bob_frame,&gotit) == 0) {
 			if (gotit) {
@@ -1104,6 +1209,8 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-head-switching <0|1> Enable/disable VHS head switching emulation\n");
 	fprintf(stderr," -vhs-head-switching-point <x> Head switching point (0....1)\n");
 	fprintf(stderr," -vhs-head-switching-noise-level <x> Head switching noise (variation)\n");
+    fprintf(stderr," -422                      Render in 4:2:2 colorspace\n");
+    fprintf(stderr," -420                      Render in 4:2:0 colorspace (default)\n"); // dammit Premiere >:(
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1123,6 +1230,12 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"422")) {
+                use_422_colorspace = true;
+            }
+            else if (!strcmp(a,"420")) {
+                use_422_colorspace = false;
+            }
 			else if (!strcmp(a,"a")) {
 				audio_stream_index = atoi(argv[i++]);
 			}
@@ -1509,7 +1622,7 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->width = output_width;
 		output_avstream_video_codec_context->height = output_height;
 		output_avstream_video_codec_context->sample_aspect_ratio = (AVRational){output_height*4, output_width*3};
-		output_avstream_video_codec_context->pix_fmt = AV_PIX_FMT_YUV422P;
+		output_avstream_video_codec_context->pix_fmt = use_422_colorspace ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV420P;
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
 
@@ -1613,7 +1726,7 @@ int main(int argc,char **argv) {
 		}
 		av_frame_set_colorspace(output_avstream_video_frame,AVCOL_SPC_SMPTE170M);
 		av_frame_set_color_range(output_avstream_video_frame,AVCOL_RANGE_MPEG);
-		output_avstream_video_frame->format = output_avstream_video_codec_context->pix_fmt;
+		output_avstream_video_frame->format = AV_PIX_FMT_YUV422P;
 		output_avstream_video_frame->height = output_height;
 		output_avstream_video_frame->width = output_width;
 		if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
@@ -1621,7 +1734,7 @@ int main(int argc,char **argv) {
 			return 1;
 		}
 
-		if (!output_video_as_interlaced) {
+		if (!output_video_as_interlaced || !use_422_colorspace) {
 			output_avstream_video_bob_frame = av_frame_alloc();
 			if (output_avstream_video_bob_frame == NULL) {
 				fprintf(stderr,"Failed to alloc video frame2\n");
@@ -1757,7 +1870,21 @@ int main(int argc,char **argv) {
 							}
 							av_frame_set_colorspace(output_avstream_video_input_frame,AVCOL_SPC_SMPTE170M);
 							av_frame_set_color_range(output_avstream_video_input_frame,AVCOL_RANGE_MPEG);
-							output_avstream_video_input_frame->format = output_avstream_video_codec_context->pix_fmt;
+
+                            // HACK: libswscale does NOT do proper 4:2:0 to 4:2:2 interlaced conversion.
+                            //       so if the source is 4:2:0 then we want upconversion to 4:2:0 and
+                            //       we'll do it properly ourselves. using libswscale means we end up
+                            //       with the chroma fields backwards.
+                            switch (input_avstream_video_frame->format) {
+                                case AV_PIX_FMT_YUV420P:
+                                case AV_PIX_FMT_YUVJ420P:
+                                    output_avstream_video_input_frame->format = AV_PIX_FMT_YUV420P;
+                                    break;
+                                default:
+                                    output_avstream_video_input_frame->format = AV_PIX_FMT_YUV422P;
+                                    break;
+                            }
+
 							output_avstream_video_input_frame->height = input_avstream_video_frame->height;
 							output_avstream_video_input_frame->width = output_width;
 							if (av_frame_get_buffer(output_avstream_video_input_frame,64) < 0) {
@@ -1782,9 +1909,9 @@ int main(int argc,char **argv) {
 								input_avstream_video_frame->height,
 								(AVPixelFormat)input_avstream_video_frame->format,
 								// dest
-								output_avstream_video_codec_context->width,
-								input_avstream_video_frame->height,
-								output_avstream_video_codec_context->pix_fmt,
+								output_avstream_video_input_frame->width,
+								output_avstream_video_input_frame->height,
+								(AVPixelFormat)output_avstream_video_input_frame->format,
 								// opt
 								SWS_BILINEAR, NULL, NULL, NULL);
 
