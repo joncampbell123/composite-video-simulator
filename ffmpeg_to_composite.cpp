@@ -1764,6 +1764,7 @@ int main(int argc,char **argv) {
 		AVPixelFormat input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
 		int input_avstream_video_resampler_height = -1;
 		int input_avstream_video_resampler_width = -1;
+        unsigned long long audio_sample = 0;
 		unsigned long long video_field = 0;
 		int dst_data_alloc_samples = 0;
 		int dst_data_linesize = 0;
@@ -1779,6 +1780,19 @@ int main(int argc,char **argv) {
 				av_packet_rescale_ts(&pkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
 				if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
 					if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
+                        unsigned long long tgt_sample = input_avstream_audio_frame->pts;
+                        if (tgt_sample == AV_NOPTS_VALUE) tgt_sample = pkt.pts;
+
+                        if (tgt_sample == AV_NOPTS_VALUE)
+                            tgt_sample = audio_sample; // don't want me to guess? give me PTS timestamps then!
+                        else {
+                            // deal with imperfections, prevent them from making an unstable frame rate
+                            signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
+
+                            if (llabs(d) < (output_audio_rate/10) && tgt_sample < audio_sample)
+                                tgt_sample = audio_sample;
+                        }
+
 						dst_data_samples = av_rescale_rnd(
 							swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
 							output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
@@ -1802,7 +1816,33 @@ int main(int argc,char **argv) {
 							}
 						}
 
-						if (dst_data != NULL) {
+                        /* pad-fill */
+                        while (audio_sample < tgt_sample) {
+                            unsigned long long out_samples = tgt_sample - audio_sample;
+
+                            if (out_samples > output_audio_rate)
+                                out_samples = output_audio_rate;
+
+                            AVPacket dstpkt;
+                            av_init_packet(&dstpkt);
+                            if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
+                                assert(dstpkt.data != NULL);
+                                assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
+                                memset(dstpkt.data,0,out_samples * 2 * output_audio_channels);
+                            }
+                            dstpkt.pts = audio_sample;
+                            dstpkt.dts = audio_sample;
+                            dstpkt.stream_index = output_avstream_audio->index;
+                            av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
+                            if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
+                                fprintf(stderr,"Failed to write frame\n");
+                            av_packet_unref(&dstpkt);
+
+                            fprintf(stderr,"Pad fill %llu samples\n",out_samples);
+                            audio_sample += out_samples;
+                        }
+
+						if (dst_data != NULL && tgt_sample >= audio_sample) {
 							int out_samples;
 
 							if ((out_samples=swr_convert(input_avstream_audio_resampler,dst_data,dst_data_samples,
@@ -1819,11 +1859,15 @@ int main(int argc,char **argv) {
 									assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
 									memcpy(dstpkt.data,dst_data[0],out_samples * 2 * output_audio_channels);
 								}
-								av_packet_copy_props(&dstpkt,&pkt);
+                                dstpkt.pts = audio_sample;
+                                dstpkt.dts = audio_sample;
 								dstpkt.stream_index = output_avstream_audio->index;
-								if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
+                                av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
+                                if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
 									fprintf(stderr,"Failed to write frame\n");
 								av_packet_unref(&dstpkt);
+
+                                audio_sample += out_samples;
 							}
 							else if (out_samples < 0) {
 								fprintf(stderr,"Failed to resample audio\n");
