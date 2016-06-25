@@ -1769,12 +1769,44 @@ int main(int argc,char **argv) {
 		int dst_data_alloc_samples = 0;
 		int dst_data_linesize = 0;
 		int dst_data_samples = 0;
+        double adj_time = 0;
 		int got_frame = 0;
+        double t,pt = -1;
 		AVPacket pkt;
 
 		av_init_packet(&pkt);
 		while (av_read_frame(input_avfmt,&pkt) >= 0) {
 			if (DIE != 0) break;
+
+            /* track time and keep things monotonic for our code */
+            if (pkt.stream_index < input_avfmt->nb_streams) {
+                if (pkt.pts != AV_NOPTS_VALUE) {
+                    t = pkt.pts * av_q2d(input_avfmt->streams[pkt.stream_index]->time_base);
+
+                    if (pt < 0)
+                        adj_time = -t;
+                    else if ((t+1.5) < pt) { // time code jumps backwards (1.5 is safe for DVD timecode resets)
+                        adj_time += pt - t;
+                        fprintf(stderr,"Time code jump backwards %.6f->%.6f. adj_time=%.6f\n",pt,t,adj_time);
+                    }
+                    else if (t > (pt+5)) { // time code jumps forwards
+                        adj_time += pt - t;
+                        fprintf(stderr,"Time code jump forwards %.6f->%.6f. adj_time=%.6f\n",pt,t,adj_time);
+                    }
+
+                    pt = t;
+                }
+
+                if (pkt.pts != AV_NOPTS_VALUE) {
+                    pkt.pts += (adj_time * input_avfmt->streams[pkt.stream_index]->time_base.den) /
+                        input_avfmt->streams[pkt.stream_index]->time_base.num;
+                }
+
+                if (pkt.dts != AV_NOPTS_VALUE) {
+                    pkt.dts += (adj_time * input_avfmt->streams[pkt.stream_index]->time_base.den) /
+                        input_avfmt->streams[pkt.stream_index]->time_base.num;
+                }
+            }
 
 			if (input_avstream_audio != NULL && pkt.stream_index == input_avstream_audio->index) {
 				av_packet_rescale_ts(&pkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
@@ -1789,7 +1821,7 @@ int main(int argc,char **argv) {
                             // deal with imperfections, prevent them from making an unstable frame rate
                             signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
 
-                            if (llabs(d) < (output_audio_rate/10) && tgt_sample < audio_sample)
+                            if (llabs(d) < (output_audio_rate/30) && tgt_sample < audio_sample)
                                 tgt_sample = audio_sample;
                         }
 
