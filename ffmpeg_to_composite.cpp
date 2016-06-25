@@ -298,6 +298,7 @@ bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not deco
 bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
 bool		vhs_chroma_vert_blend = true;		// if set, and VHS, blend vertically the chroma scanlines (as the VHS format does)
 bool		vhs_svideo_out = false;			// if not set, and VHS, video is recombined as if composite out on VCR
+bool        enable_composite_emulation = true; // if not set, video goes straight back out to the encoder.
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -1211,6 +1212,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-head-switching-noise-level <x> Head switching noise (variation)\n");
     fprintf(stderr," -422                      Render in 4:2:2 colorspace\n");
     fprintf(stderr," -420                      Render in 4:2:0 colorspace (default)\n"); // dammit Premiere >:(
+    fprintf(stderr," -nocomp                   Don't apply emulation, just transcode\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1230,6 +1232,9 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"nocomp")) {
+                enable_composite_emulation = false;
+            }
             else if (!strcmp(a,"422")) {
                 use_422_colorspace = true;
             }
@@ -1840,24 +1845,26 @@ int main(int argc,char **argv) {
 
 						if (output_avstream_video_input_frame != NULL) {
 							if (output_avstream_video_input_frame->height != input_avstream_video_frame->height) {
-								if (output_avstream_video_input_frame != NULL)
-									av_frame_free(&output_avstream_video_input_frame);
-							}
-						}
+                                if (output_avstream_video_input_frame != NULL)
+                                    av_frame_free(&output_avstream_video_input_frame);
+                            }
+                        }
 
 						if (output_avstream_video_input_frame != NULL) {
 							while (video_field < tgt_field) {
 								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
-								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 
-								if (output_video_as_interlaced) {
-									if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
-								}
-								else {
-									output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
-								}
+                                if (enable_composite_emulation)
+                                    composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 
-								video_field++;
+                                if (output_video_as_interlaced) {
+                                    if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
+                                }
+                                else {
+                                    output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
+                                }
+
+                                video_field++;
 							}
 						}
 
