@@ -1,25 +1,6 @@
 // what to do next:
 //
-// VHS Hi-Fi "buzz"
-//
-// Video decoding (scaling to 720x480 or 720x576, frame/field rate conversion to interlaced video, encode)
-// When done, all video will be rendered as if 720x480 29.97fps interlaced or 720x576 25fps interlaced.
-//
-// Fake NTSC color subcarrier generation (from chroma planes into luma).
-//
-// Rendering of color back out from luma plane fake subcarrier (NTSC artifacts and all)
-//
 // If emulating PAL, fake subcarrier needs to alternate color phase every other field scanline.
-//
-// Luma smearing/sharpen filtering to emulate analog degredation and "sharpening" in analog equipment to compensate.
-//
-// Additional luma smearing/sharpening as a side effect of preemphasis and modulation onto VHS tape.
-//
-// Video noise.
-//
-// VHS audio linear track video+audio crosstalk (ever notice you can almost hear the video signal in the audio?) and hiss.
-//
-// Luma/chroma instability and noise.
 //
 // Fake macrovision "darkening" of the top of the picture, and
 //
@@ -34,8 +15,6 @@
 // After processing audio, allow encode through non-PCM codec and write to output.
 //
 // After processing video, allow encode through non-uncompressed codec and write to output.
-//
-// FFMPEG-like options to specify which audio track to use (so DVD rips don't accidentally use the non-English tracks).
 
 #define __STDC_CONSTANT_MACROS
 
@@ -1041,6 +1020,9 @@ void output_frame(AVFrame *frame,unsigned long long field_number,unsigned int fi
 				sy = (y|1); // 1, 1, 3, 3, 5, 5, ....
 			else
 				sy = (y+1)&(~1); // 0, 2, 2, 4, 4, 6, 6, ...
+
+            if (sy >= frame->height)
+                sy -= 2;
 
 			memcpy(output_avstream_video_bob_frame->data[0] + (output_avstream_video_bob_frame->linesize[0] * y),
 				frame->data[0] + (frame->linesize[0] * sy),frame->width);//luma
