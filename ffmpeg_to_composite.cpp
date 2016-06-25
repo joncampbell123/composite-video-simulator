@@ -299,6 +299,7 @@ bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma bu
 bool		vhs_chroma_vert_blend = true;		// if set, and VHS, blend vertically the chroma scanlines (as the VHS format does)
 bool		vhs_svideo_out = false;			// if not set, and VHS, video is recombined as if composite out on VCR
 bool        enable_composite_emulation = true; // if not set, video goes straight back out to the encoder.
+bool        enable_audio_emulation = true;
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -1234,6 +1235,7 @@ static int parse_argv(int argc,char **argv) {
 			}
             else if (!strcmp(a,"nocomp")) {
                 enable_composite_emulation = false;
+                enable_audio_emulation = false;
             }
             else if (!strcmp(a,"422")) {
                 use_422_colorspace = true;
@@ -1807,8 +1809,9 @@ int main(int argc,char **argv) {
 							if ((out_samples=swr_convert(input_avstream_audio_resampler,dst_data,dst_data_samples,
 								(const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
 								// PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
-								composite_audio_process((int16_t*)dst_data[0],out_samples);
-								// write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
+                                if (enable_audio_emulation)
+                                    composite_audio_process((int16_t*)dst_data[0],out_samples);
+                                // write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
 								// that way we can render directly to MP4 our VHS emulation.
 								AVPacket dstpkt;
 								av_init_packet(&dstpkt);
