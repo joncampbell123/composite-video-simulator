@@ -1818,6 +1818,8 @@ int main(int argc,char **argv) {
                         if (tgt_sample == AV_NOPTS_VALUE)
                             tgt_sample = audio_sample; // don't want me to guess? give me PTS timestamps then!
                         else {
+                            if ((signed long long)tgt_sample < 0LL) tgt_sample = 0LL;
+
                             // deal with imperfections, prevent them from making an unstable frame rate
                             signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
 
@@ -1922,6 +1924,8 @@ int main(int argc,char **argv) {
                         if (tgt_field == AV_NOPTS_VALUE)
                             tgt_field = video_field; // don't want me to guess? give me PTS timestamps then!
                         else {
+                            if ((signed long long)tgt_field < 0LL) tgt_field = 0LL;
+
                             // deal with imperfections, prevent them from making an unstable frame rate
                             signed long long d = (signed long long)tgt_field - (signed long long)video_field;
 
