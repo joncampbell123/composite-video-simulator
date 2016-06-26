@@ -52,6 +52,7 @@ extern "C" {
 
 using namespace std;
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -1482,6 +1483,14 @@ static int parse_argv(int argc,char **argv) {
 	return 0;
 }
 
+struct AVDelayedFrameInfo {
+    AVDelayedFrameInfo() : duration(0) {
+    }
+    unsigned int        duration;
+};
+
+std::map<unsigned long long,AVDelayedFrameInfo> AVDelayed;
+
 int main(int argc,char **argv) {
 	if (parse_argv(argc,argv))
 		return 1;
@@ -1764,6 +1773,7 @@ int main(int argc,char **argv) {
 		AVPixelFormat input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
 		int input_avstream_video_resampler_height = -1;
 		int input_avstream_video_resampler_width = -1;
+        unsigned long long av_frame_counter = 0;
         unsigned long long audio_sample = 0;
 		unsigned long long video_field = 0;
 		int dst_data_alloc_samples = 0;
@@ -1917,9 +1927,19 @@ int main(int argc,char **argv) {
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&pkt,input_avstream_video->time_base,m); // convert to FIELD number
 
+                input_avstream_video_codec_context->reordered_opaque = av_frame_counter;
+                {
+                    AVDelayedFrameInfo &d = AVDelayed[av_frame_counter];
+                    d.duration = pkt.duration;
+                }
+
+                av_frame_counter++;
 				if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
 					if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
 						unsigned long long tgt_field = input_avstream_video_frame->pkt_pts;
+
+                        if (tgt_field == AV_NOPTS_VALUE)
+                            tgt_field = input_avstream_video_frame->pkt_dts;
 
                         if (tgt_field == AV_NOPTS_VALUE)
                             tgt_field = video_field; // don't want me to guess? give me PTS timestamps then!
@@ -1933,9 +1953,19 @@ int main(int argc,char **argv) {
                                 tgt_field = video_field;
                         }
 
+                        /* If FFMPEG preserved the pkt.duration across frame reordering in the same way
+                         * it preserves pkt.pts this wouldn't be necessary AND they could probably simplify
+                         * some of their own code too. Doing it this way is the best way to preserve pkt
+                         * durations and apply them to video playback in cases like i.e. NTSC telecine
+                         * pulldown when transcoding DVD transfers of film. */
                         unsigned long long tgt_pts = tgt_field;
-                        if (pkt.duration > 0)
-                            tgt_field += pkt.duration;
+                        {
+                            std::map<unsigned long long,AVDelayedFrameInfo>::iterator i = AVDelayed.find(input_avstream_video_frame->reordered_opaque);
+                            if (i != AVDelayed.end()) {
+                                tgt_field += i->second.duration;
+                                AVDelayed.erase(i);
+                            }
+                        }
 
 						if (output_avstream_video_input_frame != NULL) {
 							if (output_avstream_video_input_frame->height != input_avstream_video_frame->height) {
