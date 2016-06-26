@@ -2058,7 +2058,9 @@ int main(int argc,char **argv) {
 
 							while (video_field < tgt_field) {
 								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field,tgt_pts);
-								composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
+
+                                if (enable_composite_emulation)
+                                    composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 
 								if (output_video_as_interlaced) {
 									if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
