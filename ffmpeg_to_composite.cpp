@@ -238,6 +238,9 @@ AVCodecContext*		input_avstream_video_codec_context = NULL; // do not free
 AVFrame*		input_avstream_audio_frame = NULL;
 AVFrame*		input_avstream_video_frame = NULL;
 
+int             input_avstream_audio_resampler_rate = -1;
+int             input_avstream_audio_resampler_channels = -1;
+
 struct SwrContext*	input_avstream_audio_resampler = NULL;
 struct SwsContext*	input_avstream_video_resampler = NULL;
 
@@ -1700,6 +1703,43 @@ bool do_audio_decode_and_render(AVPacket &pkt,unsigned long long &audio_sample) 
                     tgt_sample = audio_sample;
             }
 
+            if (input_avstream_audio_resampler != NULL) {
+                if (input_avstream_audio_resampler_rate != input_avstream_audio_codec_context->sample_rate ||
+                        input_avstream_audio_resampler_channels != input_avstream_audio_codec_context->channels) {
+                    fprintf(stderr,"Audio format changed\n");
+                    swr_free(&input_avstream_audio_resampler);
+                }
+            }
+
+            if (input_avstream_audio_resampler == NULL) {
+                input_avstream_audio_resampler = swr_alloc();
+                av_opt_set_int(input_avstream_audio_resampler, "in_channel_count", input_avstream_audio_codec_context->channels, 0); // FIXME: FFMPEG should document this!!
+                av_opt_set_int(input_avstream_audio_resampler, "out_channel_count", output_avstream_audio_codec_context->channels, 0); // FIXME: FFMPEG should document this!!
+                av_opt_set_int(input_avstream_audio_resampler, "in_channel_layout", input_avstream_audio_codec_context->channel_layout, 0);
+                av_opt_set_int(input_avstream_audio_resampler, "out_channel_layout", output_avstream_audio_codec_context->channel_layout, 0);
+                av_opt_set_int(input_avstream_audio_resampler, "in_sample_rate", input_avstream_audio_codec_context->sample_rate, 0);
+                av_opt_set_int(input_avstream_audio_resampler, "out_sample_rate", output_avstream_audio_codec_context->sample_rate, 0);
+                av_opt_set_sample_fmt(input_avstream_audio_resampler, "in_sample_fmt", input_avstream_audio_codec_context->sample_fmt, 0);
+                av_opt_set_sample_fmt(input_avstream_audio_resampler, "out_sample_fmt", output_avstream_audio_codec_context->sample_fmt, 0);
+                if (swr_init(input_avstream_audio_resampler) < 0) {
+                    fprintf(stderr,"Failed to init audio resampler\n");
+                    swr_free(&input_avstream_audio_resampler);
+                    return got_frame;
+                }
+                input_avstream_audio_resampler_rate = input_avstream_audio_codec_context->sample_rate;
+                input_avstream_audio_resampler_channels = input_avstream_audio_codec_context->channels;
+
+                if (audio_dst_data != NULL) {
+                    av_freep(&audio_dst_data[0]); // NTS: Why??
+                    av_freep(&audio_dst_data);
+                }
+
+                audio_dst_data_alloc_samples = 0;
+                fprintf(stderr,"Audio resampler init %uHz -> %uHz\n",
+                        input_avstream_audio_codec_context->sample_rate,
+                        output_avstream_audio_codec_context->sample_rate);
+            }
+
             audio_dst_data_samples = av_rescale_rnd(
                     swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
                     output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
@@ -1897,24 +1937,6 @@ int main(int argc,char **argv) {
 			fprintf(stderr,"Output stream cannot open codec\n");
 			return 1;
 		}
-
-		input_avstream_audio_resampler = swr_alloc();
-		av_opt_set_int(input_avstream_audio_resampler, "in_channel_count", input_avstream_audio_codec_context->channels, 0); // FIXME: FFMPEG should document this!!
-		av_opt_set_int(input_avstream_audio_resampler, "out_channel_count", output_avstream_audio_codec_context->channels, 0); // FIXME: FFMPEG should document this!!
-		av_opt_set_int(input_avstream_audio_resampler, "in_channel_layout", input_avstream_audio_codec_context->channel_layout, 0);
-		av_opt_set_int(input_avstream_audio_resampler, "out_channel_layout", output_avstream_audio_codec_context->channel_layout, 0);
-		av_opt_set_int(input_avstream_audio_resampler, "in_sample_rate", input_avstream_audio_codec_context->sample_rate, 0);
-		av_opt_set_int(input_avstream_audio_resampler, "out_sample_rate", output_avstream_audio_codec_context->sample_rate, 0);
-		av_opt_set_sample_fmt(input_avstream_audio_resampler, "in_sample_fmt", input_avstream_audio_codec_context->sample_fmt, 0);
-		av_opt_set_sample_fmt(input_avstream_audio_resampler, "out_sample_fmt", output_avstream_audio_codec_context->sample_fmt, 0);
-		if (swr_init(input_avstream_audio_resampler) < 0) {
-			fprintf(stderr,"Failed to init audio resampler\n");
-			return 1;
-		}
-
-		fprintf(stderr,"Audio resampler init %uHz -> %uHz\n",
-			input_avstream_audio_codec_context->sample_rate,
-			output_avstream_audio_codec_context->sample_rate);
 	}
 
 	if (input_avstream_video != NULL) {
