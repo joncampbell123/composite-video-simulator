@@ -2174,6 +2174,8 @@ int main(int argc,char **argv) {
          * we need the encoder to flush those frames out. */
         {
             do {
+                if (DIE != 0) break;
+
                 pkt.size = 0;
                 pkt.data = NULL;
                 got_frame = do_video_decode_and_render(/*&*/pkt,/*&*/video_field);
@@ -2184,6 +2186,8 @@ int main(int argc,char **argv) {
          * we need the encoder to flush those frames out. */
         {
             do {
+                if (DIE != 0) break;
+
                 pkt.size = 0;
                 pkt.data = NULL;
                 got_frame = do_audio_decode_and_render(/*&*/pkt,/*&*/audio_sample) ? 1 : 0;
