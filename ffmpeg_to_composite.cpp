@@ -253,6 +253,10 @@ AVFrame*		output_avstream_video_bob_frame = NULL;     // 4:2:0 or 4:2:2
 
 bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
 
+double          transcode_start = -1;
+double          transcode_end = -1;
+double          transcode_dur = -1;
+
 double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
 double			composite_preemphasis_cut = 1000000;
 
@@ -1214,6 +1218,9 @@ static void help(const char *arg0) {
     fprintf(stderr," -422                      Render in 4:2:2 colorspace\n");
     fprintf(stderr," -420                      Render in 4:2:0 colorspace (default)\n"); // dammit Premiere >:(
     fprintf(stderr," -nocomp                   Don't apply emulation, just transcode\n");
+    fprintf(stderr," -ss <t>                   Start transcoding from t seconds\n");
+    fprintf(stderr," -se <t>                   Stop transcoding at t seconds\n");
+    fprintf(stderr," -t <t>                    Transcode only t seconds\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1233,6 +1240,15 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"ss")) {
+                transcode_start = atof(argv[i++]);
+            }
+            else if (!strcmp(a,"se")) {
+                transcode_end = atof(argv[i++]);
+            }
+            else if (!strcmp(a,"t")) {
+                transcode_dur = atof(argv[i++]);
+            }
             else if (!strcmp(a,"nocomp")) {
                 enable_composite_emulation = false;
                 enable_audio_emulation = false;
@@ -1432,6 +1448,20 @@ static int parse_argv(int argc,char **argv) {
 			return 1;
 		}
 	}
+
+    if (transcode_start >= 0 && transcode_end >= 0)
+        transcode_dur = transcode_end - transcode_start;
+    if (transcode_start < 0)
+        transcode_start = 0;
+    if (transcode_end < 0 && transcode_dur >= 0)
+        transcode_end = transcode_start + transcode_dur;
+    if (transcode_start >= 0 && transcode_end >= 0 && transcode_start >= transcode_end) {
+        fprintf(stderr,"nothing to transcode\n");
+        return 1;
+    }
+
+    fprintf(stderr,"Transcoding from %.2f to %.2f\n",
+        transcode_start,transcode_end);
 
 	if (emulating_vhs) {
 		if (output_vhs_hifi) {
@@ -1792,6 +1822,10 @@ int main(int argc,char **argv) {
             if (pkt.stream_index < input_avfmt->nb_streams) {
                 if (pkt.pts != AV_NOPTS_VALUE) {
                     t = pkt.pts * av_q2d(input_avfmt->streams[pkt.stream_index]->time_base);
+                    if (transcode_end >= 0 && t >= transcode_end)
+                        break;
+                    if (t < transcode_start)
+                        continue;
 
                     if (pt < 0)
                         adj_time = -t;
@@ -1806,6 +1840,9 @@ int main(int argc,char **argv) {
 
                     pt = t;
                 }
+
+                if (pt < 0)
+                    continue;
 
                 if (pkt.pts != AV_NOPTS_VALUE) {
                     pkt.pts += (adj_time * input_avfmt->streams[pkt.stream_index]->time_base.den) /
