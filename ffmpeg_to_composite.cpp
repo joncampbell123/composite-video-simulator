@@ -1521,6 +1521,274 @@ struct AVDelayedFrameInfo {
 
 std::map<unsigned long long,AVDelayedFrameInfo> AVDelayed;
 
+AVPixelFormat input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
+int input_avstream_video_resampler_height = -1;
+int input_avstream_video_resampler_width = -1;
+
+uint8_t **audio_dst_data = NULL;
+int audio_dst_data_alloc_samples = 0;
+int audio_dst_data_linesize = 0;
+int audio_dst_data_samples = 0;
+
+bool do_video_decode_and_render(AVPacket &pkt,unsigned long long &video_field) {
+    int got_frame = 0;
+
+    if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
+        if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
+            unsigned long long tgt_field = input_avstream_video_frame->pkt_pts;
+
+            if (tgt_field == AV_NOPTS_VALUE)
+                tgt_field = input_avstream_video_frame->pkt_dts;
+
+            if (tgt_field == AV_NOPTS_VALUE)
+                tgt_field = video_field; // don't want me to guess? give me PTS timestamps then!
+            else {
+                if ((signed long long)tgt_field < 0LL) tgt_field = 0LL;
+
+                // deal with imperfections, prevent them from making an unstable frame rate
+                signed long long d = (signed long long)tgt_field - (signed long long)video_field;
+
+                if (llabs(d) < 4 && tgt_field < video_field)
+                    tgt_field = video_field;
+            }
+
+            /* If FFMPEG preserved the pkt.duration across frame reordering in the same way
+             * it preserves pkt.pts this wouldn't be necessary AND they could probably simplify
+             * some of their own code too. Doing it this way is the best way to preserve pkt
+             * durations and apply them to video playback in cases like i.e. NTSC telecine
+             * pulldown when transcoding DVD transfers of film. */
+            unsigned long long tgt_pts = tgt_field;
+            {
+                std::map<unsigned long long,AVDelayedFrameInfo>::iterator i = AVDelayed.find(input_avstream_video_frame->reordered_opaque);
+                if (i != AVDelayed.end()) {
+                    tgt_field += i->second.duration;
+                    AVDelayed.erase(i);
+                }
+            }
+
+            if (output_avstream_video_input_frame != NULL) {
+                if (output_avstream_video_input_frame->height != input_avstream_video_frame->height) {
+                    if (output_avstream_video_input_frame != NULL)
+                        av_frame_free(&output_avstream_video_input_frame);
+                }
+            }
+
+            if (output_avstream_video_input_frame == NULL) {
+                fprintf(stderr,"New input frame\n");
+                output_avstream_video_input_frame = av_frame_alloc();
+                if (output_avstream_video_input_frame == NULL) {
+                    fprintf(stderr,"Failed to alloc video frame\n");
+                    return 1;
+                }
+                av_frame_set_colorspace(output_avstream_video_input_frame,AVCOL_SPC_SMPTE170M);
+                av_frame_set_color_range(output_avstream_video_input_frame,AVCOL_RANGE_MPEG);
+
+                // HACK: libswscale does NOT do proper 4:2:0 to 4:2:2 interlaced conversion.
+                //       so if the source is 4:2:0 then we want upconversion to 4:2:0 and
+                //       we'll do it properly ourselves. using libswscale means we end up
+                //       with the chroma fields backwards.
+                switch (input_avstream_video_frame->format) {
+                    case AV_PIX_FMT_YUV420P:
+                    case AV_PIX_FMT_YUVJ420P:
+                        output_avstream_video_input_frame->format = AV_PIX_FMT_YUV420P;
+                        break;
+                    default:
+                        output_avstream_video_input_frame->format = AV_PIX_FMT_YUV422P;
+                        break;
+                }
+
+                output_avstream_video_input_frame->height = input_avstream_video_frame->height;
+                output_avstream_video_input_frame->width = output_width;
+                if (av_frame_get_buffer(output_avstream_video_input_frame,64) < 0) {
+                    fprintf(stderr,"Failed to alloc render frame\n");
+                    return 1;
+                }
+            }
+
+            if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
+                if (input_avstream_video_resampler_format != input_avstream_video_frame->format ||
+                        input_avstream_video_resampler_width != input_avstream_video_frame->width ||
+                        input_avstream_video_resampler_height != input_avstream_video_frame->height) {
+                    sws_freeContext(input_avstream_video_resampler);
+                    input_avstream_video_resampler = NULL;
+                }
+            }
+
+            if (input_avstream_video_resampler == NULL) {
+                input_avstream_video_resampler = sws_getContext(
+                        // source
+                        input_avstream_video_frame->width,
+                        input_avstream_video_frame->height,
+                        (AVPixelFormat)input_avstream_video_frame->format,
+                        // dest
+                        output_avstream_video_input_frame->width,
+                        output_avstream_video_input_frame->height,
+                        (AVPixelFormat)output_avstream_video_input_frame->format,
+                        // opt
+                        SWS_BILINEAR, NULL, NULL, NULL);
+
+                if (input_avstream_video_resampler != NULL) {
+                    fprintf(stderr,"sws_getContext new context\n");
+                    input_avstream_video_resampler_format = (AVPixelFormat)input_avstream_video_frame->format;
+                    input_avstream_video_resampler_width = input_avstream_video_frame->width;
+                    input_avstream_video_resampler_height = input_avstream_video_frame->height;
+                }
+                else {
+                    fprintf(stderr,"sws_getContext fail\n");
+                }
+            }
+
+            if (input_avstream_video_resampler != NULL) {
+                output_avstream_video_input_frame->pts = input_avstream_video_frame->pts;
+                output_avstream_video_input_frame->pkt_pts = input_avstream_video_frame->pkt_pts;
+                output_avstream_video_input_frame->pkt_dts = input_avstream_video_frame->pkt_dts;
+                output_avstream_video_input_frame->top_field_first = input_avstream_video_frame->top_field_first;
+                output_avstream_video_input_frame->interlaced_frame = input_avstream_video_frame->interlaced_frame;
+
+                if (sws_scale(input_avstream_video_resampler,
+                            // source
+                            input_avstream_video_frame->data,
+                            input_avstream_video_frame->linesize,
+                            0,input_avstream_video_frame->height,
+                            // dest
+                            output_avstream_video_input_frame->data,
+                            output_avstream_video_input_frame->linesize) <= 0)
+                    fprintf(stderr,"WARNING: sws_scale failed\n");
+
+                while (video_field < tgt_field) {
+                    render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field,tgt_pts);
+
+                    if (enable_composite_emulation)
+                        composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
+
+                    if (output_video_as_interlaced) {
+                        if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
+                    }
+                    else {
+                        output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
+                    }
+
+                    video_field++;
+                }
+            }
+        }
+    }
+    else {
+        fprintf(stderr,"No video decoded\n");
+    }
+
+    return (got_frame != 0);
+}
+
+bool do_audio_decode_and_render(AVPacket &pkt,unsigned long long &audio_sample) {
+    int got_frame = 0;
+
+    if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
+        if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
+            unsigned long long tgt_sample = input_avstream_audio_frame->pts;
+            if (tgt_sample == AV_NOPTS_VALUE) tgt_sample = pkt.pts;
+
+            if (tgt_sample == AV_NOPTS_VALUE)
+                tgt_sample = audio_sample; // don't want me to guess? give me PTS timestamps then!
+            else {
+                if ((signed long long)tgt_sample < 0LL) tgt_sample = 0LL;
+
+                // deal with imperfections, prevent them from making an unstable frame rate
+                signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
+
+                if (llabs(d) < (output_audio_rate/30) && tgt_sample < audio_sample)
+                    tgt_sample = audio_sample;
+            }
+
+            audio_dst_data_samples = av_rescale_rnd(
+                    swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
+                    output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
+
+            if (audio_dst_data == NULL || audio_dst_data_samples > audio_dst_data_alloc_samples) {
+                if (audio_dst_data != NULL) {
+                    av_freep(&audio_dst_data[0]); // NTS: Why??
+                    av_freep(&audio_dst_data);
+                }
+
+                audio_dst_data_alloc_samples = 0;
+                fprintf(stderr,"Allocating audio buffer %u samples\n",(unsigned int)audio_dst_data_samples);
+                if (av_samples_alloc_array_and_samples(&audio_dst_data,&audio_dst_data_linesize,
+                            output_avstream_audio_codec_context->channels,audio_dst_data_samples,
+                            output_avstream_audio_codec_context->sample_fmt, 0) >= 0) {
+                    audio_dst_data_alloc_samples = audio_dst_data_samples;
+                }
+                else {
+                    fprintf(stderr,"Failure to allocate audio buffer\n");
+                    audio_dst_data_alloc_samples = 0;
+                }
+            }
+
+            /* pad-fill */
+            while (audio_sample < tgt_sample) {
+                unsigned long long out_samples = tgt_sample - audio_sample;
+
+                if (out_samples > output_audio_rate)
+                    out_samples = output_audio_rate;
+
+                AVPacket dstpkt;
+                av_init_packet(&dstpkt);
+                if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
+                    assert(dstpkt.data != NULL);
+                    assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
+                    memset(dstpkt.data,0,out_samples * 2 * output_audio_channels);
+                }
+                dstpkt.pts = audio_sample;
+                dstpkt.dts = audio_sample;
+                dstpkt.stream_index = output_avstream_audio->index;
+                av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
+                if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
+                    fprintf(stderr,"Failed to write frame\n");
+                av_packet_unref(&dstpkt);
+
+                fprintf(stderr,"Pad fill %llu samples\n",out_samples);
+                audio_sample += out_samples;
+            }
+
+            if (audio_dst_data != NULL && tgt_sample >= audio_sample) {
+                int out_samples;
+
+                if ((out_samples=swr_convert(input_avstream_audio_resampler,audio_dst_data,audio_dst_data_samples,
+                                (const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
+                    // PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
+                    if (enable_audio_emulation)
+                        composite_audio_process((int16_t*)audio_dst_data[0],out_samples);
+                    // write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
+                    // that way we can render directly to MP4 our VHS emulation.
+                    AVPacket dstpkt;
+                    av_init_packet(&dstpkt);
+                    if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
+                        assert(dstpkt.data != NULL);
+                        assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
+                        memcpy(dstpkt.data,audio_dst_data[0],out_samples * 2 * output_audio_channels);
+                    }
+                    dstpkt.pts = audio_sample;
+                    dstpkt.dts = audio_sample;
+                    dstpkt.stream_index = output_avstream_audio->index;
+                    av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
+                    if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
+                        fprintf(stderr,"Failed to write frame\n");
+                    av_packet_unref(&dstpkt);
+
+                    audio_sample += out_samples;
+                }
+                else if (out_samples < 0) {
+                    fprintf(stderr,"Failed to resample audio\n");
+                }
+            }
+        }
+    }
+    else {
+        fprintf(stderr,"No audio decoded\n");
+    }
+
+    return (got_frame != 0);
+}
+
 int main(int argc,char **argv) {
 	if (parse_argv(argc,argv))
 		return 1;
@@ -1799,21 +2067,13 @@ int main(int argc,char **argv) {
 
 	// PARSE
 	{
-		AVPixelFormat input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
-		int input_avstream_video_resampler_height = -1;
-		int input_avstream_video_resampler_width = -1;
         unsigned long long av_frame_counter = 0;
         unsigned long long audio_sample = 0;
 		unsigned long long video_field = 0;
         double adj_time = 0;
-		int got_frame = 0;
+        int got_frame = 0;
         double t,pt = -1;
 		AVPacket pkt;
-
-        uint8_t **audio_dst_data = NULL;
-		int audio_dst_data_alloc_samples = 0;
-		int audio_dst_data_linesize = 0;
-		int audio_dst_data_samples = 0;
 
 		av_init_packet(&pkt);
 		while (av_read_frame(input_avfmt,&pkt) >= 0) {
@@ -1858,108 +2118,7 @@ int main(int argc,char **argv) {
 
 			if (input_avstream_audio != NULL && pkt.stream_index == input_avstream_audio->index) {
 				av_packet_rescale_ts(&pkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
-				if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
-					if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
-                        unsigned long long tgt_sample = input_avstream_audio_frame->pts;
-                        if (tgt_sample == AV_NOPTS_VALUE) tgt_sample = pkt.pts;
-
-                        if (tgt_sample == AV_NOPTS_VALUE)
-                            tgt_sample = audio_sample; // don't want me to guess? give me PTS timestamps then!
-                        else {
-                            if ((signed long long)tgt_sample < 0LL) tgt_sample = 0LL;
-
-                            // deal with imperfections, prevent them from making an unstable frame rate
-                            signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
-
-                            if (llabs(d) < (output_audio_rate/30) && tgt_sample < audio_sample)
-                                tgt_sample = audio_sample;
-                        }
-
-						audio_dst_data_samples = av_rescale_rnd(
-							swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
-							output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
-
-						if (audio_dst_data == NULL || audio_dst_data_samples > audio_dst_data_alloc_samples) {
-							if (audio_dst_data != NULL) {
-								av_freep(&audio_dst_data[0]); // NTS: Why??
-								av_freep(&audio_dst_data);
-							}
-
-							audio_dst_data_alloc_samples = 0;
-							fprintf(stderr,"Allocating audio buffer %u samples\n",(unsigned int)audio_dst_data_samples);
-							if (av_samples_alloc_array_and_samples(&audio_dst_data,&audio_dst_data_linesize,
-								output_avstream_audio_codec_context->channels,audio_dst_data_samples,
-								output_avstream_audio_codec_context->sample_fmt, 0) >= 0) {
-								audio_dst_data_alloc_samples = audio_dst_data_samples;
-							}
-							else {
-								fprintf(stderr,"Failure to allocate audio buffer\n");
-								audio_dst_data_alloc_samples = 0;
-							}
-						}
-
-                        /* pad-fill */
-                        while (audio_sample < tgt_sample) {
-                            unsigned long long out_samples = tgt_sample - audio_sample;
-
-                            if (out_samples > output_audio_rate)
-                                out_samples = output_audio_rate;
-
-                            AVPacket dstpkt;
-                            av_init_packet(&dstpkt);
-                            if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
-                                assert(dstpkt.data != NULL);
-                                assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
-                                memset(dstpkt.data,0,out_samples * 2 * output_audio_channels);
-                            }
-                            dstpkt.pts = audio_sample;
-                            dstpkt.dts = audio_sample;
-                            dstpkt.stream_index = output_avstream_audio->index;
-                            av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
-                            if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
-                                fprintf(stderr,"Failed to write frame\n");
-                            av_packet_unref(&dstpkt);
-
-                            fprintf(stderr,"Pad fill %llu samples\n",out_samples);
-                            audio_sample += out_samples;
-                        }
-
-						if (audio_dst_data != NULL && tgt_sample >= audio_sample) {
-							int out_samples;
-
-							if ((out_samples=swr_convert(input_avstream_audio_resampler,audio_dst_data,audio_dst_data_samples,
-								(const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
-								// PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
-                                if (enable_audio_emulation)
-                                    composite_audio_process((int16_t*)audio_dst_data[0],out_samples);
-                                // write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
-								// that way we can render directly to MP4 our VHS emulation.
-								AVPacket dstpkt;
-								av_init_packet(&dstpkt);
-								if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
-									assert(dstpkt.data != NULL);
-									assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
-									memcpy(dstpkt.data,audio_dst_data[0],out_samples * 2 * output_audio_channels);
-								}
-                                dstpkt.pts = audio_sample;
-                                dstpkt.dts = audio_sample;
-								dstpkt.stream_index = output_avstream_audio->index;
-                                av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
-                                if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
-									fprintf(stderr,"Failed to write frame\n");
-								av_packet_unref(&dstpkt);
-
-                                audio_sample += out_samples;
-							}
-							else if (out_samples < 0) {
-								fprintf(stderr,"Failed to resample audio\n");
-							}
-						}
-					}
-				}
-				else {
-					fprintf(stderr,"No audio decoded\n");
-				}
+                do_audio_decode_and_render(/*&*/pkt,/*&*/audio_sample);
 			}
 			else if (input_avstream_video != NULL && pkt.stream_index == input_avstream_video->index) {
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
@@ -1972,149 +2131,7 @@ int main(int argc,char **argv) {
                 }
 
                 av_frame_counter++;
-				if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
-					if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
-						unsigned long long tgt_field = input_avstream_video_frame->pkt_pts;
-
-                        if (tgt_field == AV_NOPTS_VALUE)
-                            tgt_field = input_avstream_video_frame->pkt_dts;
-
-                        if (tgt_field == AV_NOPTS_VALUE)
-                            tgt_field = video_field; // don't want me to guess? give me PTS timestamps then!
-                        else {
-                            if ((signed long long)tgt_field < 0LL) tgt_field = 0LL;
-
-                            // deal with imperfections, prevent them from making an unstable frame rate
-                            signed long long d = (signed long long)tgt_field - (signed long long)video_field;
-
-                            if (llabs(d) < 4 && tgt_field < video_field)
-                                tgt_field = video_field;
-                        }
-
-                        /* If FFMPEG preserved the pkt.duration across frame reordering in the same way
-                         * it preserves pkt.pts this wouldn't be necessary AND they could probably simplify
-                         * some of their own code too. Doing it this way is the best way to preserve pkt
-                         * durations and apply them to video playback in cases like i.e. NTSC telecine
-                         * pulldown when transcoding DVD transfers of film. */
-                        unsigned long long tgt_pts = tgt_field;
-                        {
-                            std::map<unsigned long long,AVDelayedFrameInfo>::iterator i = AVDelayed.find(input_avstream_video_frame->reordered_opaque);
-                            if (i != AVDelayed.end()) {
-                                tgt_field += i->second.duration;
-                                AVDelayed.erase(i);
-                            }
-                        }
-
-						if (output_avstream_video_input_frame != NULL) {
-							if (output_avstream_video_input_frame->height != input_avstream_video_frame->height) {
-                                if (output_avstream_video_input_frame != NULL)
-                                    av_frame_free(&output_avstream_video_input_frame);
-                            }
-                        }
-
-						if (output_avstream_video_input_frame == NULL) {
-							fprintf(stderr,"New input frame\n");
-							output_avstream_video_input_frame = av_frame_alloc();
-							if (output_avstream_video_input_frame == NULL) {
-								fprintf(stderr,"Failed to alloc video frame\n");
-								return 1;
-							}
-							av_frame_set_colorspace(output_avstream_video_input_frame,AVCOL_SPC_SMPTE170M);
-							av_frame_set_color_range(output_avstream_video_input_frame,AVCOL_RANGE_MPEG);
-
-                            // HACK: libswscale does NOT do proper 4:2:0 to 4:2:2 interlaced conversion.
-                            //       so if the source is 4:2:0 then we want upconversion to 4:2:0 and
-                            //       we'll do it properly ourselves. using libswscale means we end up
-                            //       with the chroma fields backwards.
-                            switch (input_avstream_video_frame->format) {
-                                case AV_PIX_FMT_YUV420P:
-                                case AV_PIX_FMT_YUVJ420P:
-                                    output_avstream_video_input_frame->format = AV_PIX_FMT_YUV420P;
-                                    break;
-                                default:
-                                    output_avstream_video_input_frame->format = AV_PIX_FMT_YUV422P;
-                                    break;
-                            }
-
-							output_avstream_video_input_frame->height = input_avstream_video_frame->height;
-							output_avstream_video_input_frame->width = output_width;
-							if (av_frame_get_buffer(output_avstream_video_input_frame,64) < 0) {
-								fprintf(stderr,"Failed to alloc render frame\n");
-								return 1;
-							}
-						}
-
-						if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
-							if (input_avstream_video_resampler_format != input_avstream_video_frame->format ||
-								input_avstream_video_resampler_width != input_avstream_video_frame->width ||
-								input_avstream_video_resampler_height != input_avstream_video_frame->height) {
-								sws_freeContext(input_avstream_video_resampler);
-								input_avstream_video_resampler = NULL;
-							}
-						}
-
-						if (input_avstream_video_resampler == NULL) {
-							input_avstream_video_resampler = sws_getContext(
-								// source
-								input_avstream_video_frame->width,
-								input_avstream_video_frame->height,
-								(AVPixelFormat)input_avstream_video_frame->format,
-								// dest
-								output_avstream_video_input_frame->width,
-								output_avstream_video_input_frame->height,
-								(AVPixelFormat)output_avstream_video_input_frame->format,
-								// opt
-								SWS_BILINEAR, NULL, NULL, NULL);
-
-							if (input_avstream_video_resampler != NULL) {
-								fprintf(stderr,"sws_getContext new context\n");
-								input_avstream_video_resampler_format = (AVPixelFormat)input_avstream_video_frame->format;
-								input_avstream_video_resampler_width = input_avstream_video_frame->width;
-								input_avstream_video_resampler_height = input_avstream_video_frame->height;
-							}
-							else {
-								fprintf(stderr,"sws_getContext fail\n");
-							}
-						}
-
-						if (input_avstream_video_resampler != NULL) {
-							output_avstream_video_input_frame->pts = input_avstream_video_frame->pts;
-							output_avstream_video_input_frame->pkt_pts = input_avstream_video_frame->pkt_pts;
-							output_avstream_video_input_frame->pkt_dts = input_avstream_video_frame->pkt_dts;
-							output_avstream_video_input_frame->top_field_first = input_avstream_video_frame->top_field_first;
-							output_avstream_video_input_frame->interlaced_frame = input_avstream_video_frame->interlaced_frame;
-
-							if (sws_scale(input_avstream_video_resampler,
-								// source
-								input_avstream_video_frame->data,
-								input_avstream_video_frame->linesize,
-								0,input_avstream_video_frame->height,
-								// dest
-								output_avstream_video_input_frame->data,
-								output_avstream_video_input_frame->linesize) <= 0)
-								fprintf(stderr,"WARNING: sws_scale failed\n");
-
-							while (video_field < tgt_field) {
-								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field,tgt_pts);
-
-                                if (enable_composite_emulation)
-                                    composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
-
-								if (output_video_as_interlaced) {
-									if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
-								}
-								else {
-									output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
-								}
-
-								video_field++;
-							}
-						}
-					}
-				}
-				else {
-					fprintf(stderr,"No video decoded\n");
-				}
+                do_video_decode_and_render(/*&*/pkt,/*&*/video_field);
 			}
 
 			av_packet_unref(&pkt);
@@ -2127,150 +2144,7 @@ int main(int argc,char **argv) {
             do {
                 pkt.size = 0;
                 pkt.data = NULL;
-                got_frame = 0;
-				if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
-					if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
-						unsigned long long tgt_field = input_avstream_video_frame->pkt_pts;
-
-                        if (tgt_field == AV_NOPTS_VALUE)
-                            tgt_field = input_avstream_video_frame->pkt_dts;
-
-                        if (tgt_field == AV_NOPTS_VALUE)
-                            tgt_field = video_field; // don't want me to guess? give me PTS timestamps then!
-                        else {
-                            if ((signed long long)tgt_field < 0LL) tgt_field = 0LL;
-
-                            // deal with imperfections, prevent them from making an unstable frame rate
-                            signed long long d = (signed long long)tgt_field - (signed long long)video_field;
-
-                            if (llabs(d) < 4 && tgt_field < video_field)
-                                tgt_field = video_field;
-                        }
-
-                        /* If FFMPEG preserved the pkt.duration across frame reordering in the same way
-                         * it preserves pkt.pts this wouldn't be necessary AND they could probably simplify
-                         * some of their own code too. Doing it this way is the best way to preserve pkt
-                         * durations and apply them to video playback in cases like i.e. NTSC telecine
-                         * pulldown when transcoding DVD transfers of film. */
-                        unsigned long long tgt_pts = tgt_field;
-                        {
-                            std::map<unsigned long long,AVDelayedFrameInfo>::iterator i = AVDelayed.find(input_avstream_video_frame->reordered_opaque);
-                            if (i != AVDelayed.end()) {
-                                tgt_field += i->second.duration;
-                                AVDelayed.erase(i);
-                            }
-                        }
-
-						if (output_avstream_video_input_frame != NULL) {
-							if (output_avstream_video_input_frame->height != input_avstream_video_frame->height) {
-                                if (output_avstream_video_input_frame != NULL)
-                                    av_frame_free(&output_avstream_video_input_frame);
-                            }
-                        }
-
-						if (output_avstream_video_input_frame == NULL) {
-							fprintf(stderr,"New input frame\n");
-							output_avstream_video_input_frame = av_frame_alloc();
-							if (output_avstream_video_input_frame == NULL) {
-								fprintf(stderr,"Failed to alloc video frame\n");
-								return 1;
-							}
-							av_frame_set_colorspace(output_avstream_video_input_frame,AVCOL_SPC_SMPTE170M);
-							av_frame_set_color_range(output_avstream_video_input_frame,AVCOL_RANGE_MPEG);
-
-                            // HACK: libswscale does NOT do proper 4:2:0 to 4:2:2 interlaced conversion.
-                            //       so if the source is 4:2:0 then we want upconversion to 4:2:0 and
-                            //       we'll do it properly ourselves. using libswscale means we end up
-                            //       with the chroma fields backwards.
-                            switch (input_avstream_video_frame->format) {
-                                case AV_PIX_FMT_YUV420P:
-                                case AV_PIX_FMT_YUVJ420P:
-                                    output_avstream_video_input_frame->format = AV_PIX_FMT_YUV420P;
-                                    break;
-                                default:
-                                    output_avstream_video_input_frame->format = AV_PIX_FMT_YUV422P;
-                                    break;
-                            }
-
-							output_avstream_video_input_frame->height = input_avstream_video_frame->height;
-							output_avstream_video_input_frame->width = output_width;
-							if (av_frame_get_buffer(output_avstream_video_input_frame,64) < 0) {
-								fprintf(stderr,"Failed to alloc render frame\n");
-								return 1;
-							}
-						}
-
-						if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
-							if (input_avstream_video_resampler_format != input_avstream_video_frame->format ||
-								input_avstream_video_resampler_width != input_avstream_video_frame->width ||
-								input_avstream_video_resampler_height != input_avstream_video_frame->height) {
-								sws_freeContext(input_avstream_video_resampler);
-								input_avstream_video_resampler = NULL;
-							}
-						}
-
-						if (input_avstream_video_resampler == NULL) {
-							input_avstream_video_resampler = sws_getContext(
-								// source
-								input_avstream_video_frame->width,
-								input_avstream_video_frame->height,
-								(AVPixelFormat)input_avstream_video_frame->format,
-								// dest
-								output_avstream_video_input_frame->width,
-								output_avstream_video_input_frame->height,
-								(AVPixelFormat)output_avstream_video_input_frame->format,
-								// opt
-								SWS_BILINEAR, NULL, NULL, NULL);
-
-							if (input_avstream_video_resampler != NULL) {
-								fprintf(stderr,"sws_getContext new context\n");
-								input_avstream_video_resampler_format = (AVPixelFormat)input_avstream_video_frame->format;
-								input_avstream_video_resampler_width = input_avstream_video_frame->width;
-								input_avstream_video_resampler_height = input_avstream_video_frame->height;
-							}
-							else {
-								fprintf(stderr,"sws_getContext fail\n");
-							}
-						}
-
-						if (input_avstream_video_resampler != NULL) {
-							output_avstream_video_input_frame->pts = input_avstream_video_frame->pts;
-							output_avstream_video_input_frame->pkt_pts = input_avstream_video_frame->pkt_pts;
-							output_avstream_video_input_frame->pkt_dts = input_avstream_video_frame->pkt_dts;
-							output_avstream_video_input_frame->top_field_first = input_avstream_video_frame->top_field_first;
-							output_avstream_video_input_frame->interlaced_frame = input_avstream_video_frame->interlaced_frame;
-
-							if (sws_scale(input_avstream_video_resampler,
-								// source
-								input_avstream_video_frame->data,
-								input_avstream_video_frame->linesize,
-								0,input_avstream_video_frame->height,
-								// dest
-								output_avstream_video_input_frame->data,
-								output_avstream_video_input_frame->linesize) <= 0)
-								fprintf(stderr,"WARNING: sws_scale failed\n");
-
-							while (video_field < tgt_field) {
-								render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field,tgt_pts);
-
-                                if (enable_composite_emulation)
-                                    composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
-
-								if (output_video_as_interlaced) {
-									if ((video_field & 1ULL)) output_frame(output_avstream_video_frame,video_field - 1ULL,(int)((video_field - 1ULL) & 1ULL) ^ 1/*bottom field first*/);
-								}
-								else {
-									output_frame(output_avstream_video_frame,video_field,(int)(video_field & 1ULL) ^ 1/*bottom field first*/);
-								}
-
-								video_field++;
-							}
-						}
-					}
-				}
-				else {
-					fprintf(stderr,"No video decoded\n");
-				}
+                got_frame = do_video_decode_and_render(/*&*/pkt,/*&*/video_field);
             } while (got_frame);
         }
 
@@ -2280,109 +2154,7 @@ int main(int argc,char **argv) {
             do {
                 pkt.size = 0;
                 pkt.data = NULL;
-                got_frame = 0;
-				if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
-					if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
-                        unsigned long long tgt_sample = input_avstream_audio_frame->pts;
-                        if (tgt_sample == AV_NOPTS_VALUE) tgt_sample = pkt.pts;
-
-                        if (tgt_sample == AV_NOPTS_VALUE)
-                            tgt_sample = audio_sample; // don't want me to guess? give me PTS timestamps then!
-                        else {
-                            if ((signed long long)tgt_sample < 0LL) tgt_sample = 0LL;
-
-                            // deal with imperfections, prevent them from making an unstable frame rate
-                            signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
-
-                            if (llabs(d) < (output_audio_rate/30) && tgt_sample < audio_sample)
-                                tgt_sample = audio_sample;
-                        }
-
-						audio_dst_data_samples = av_rescale_rnd(
-							swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
-							output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
-
-						if (audio_dst_data == NULL || audio_dst_data_samples > audio_dst_data_alloc_samples) {
-							if (audio_dst_data != NULL) {
-								av_freep(&audio_dst_data[0]); // NTS: Why??
-								av_freep(&audio_dst_data);
-							}
-
-							audio_dst_data_alloc_samples = 0;
-							fprintf(stderr,"Allocating audio buffer %u samples\n",(unsigned int)audio_dst_data_samples);
-							if (av_samples_alloc_array_and_samples(&audio_dst_data,&audio_dst_data_linesize,
-								output_avstream_audio_codec_context->channels,audio_dst_data_samples,
-								output_avstream_audio_codec_context->sample_fmt, 0) >= 0) {
-								audio_dst_data_alloc_samples = audio_dst_data_samples;
-							}
-							else {
-								fprintf(stderr,"Failure to allocate audio buffer\n");
-								audio_dst_data_alloc_samples = 0;
-							}
-						}
-
-                        /* pad-fill */
-                        while (audio_sample < tgt_sample) {
-                            unsigned long long out_samples = tgt_sample - audio_sample;
-
-                            if (out_samples > output_audio_rate)
-                                out_samples = output_audio_rate;
-
-                            AVPacket dstpkt;
-                            av_init_packet(&dstpkt);
-                            if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
-                                assert(dstpkt.data != NULL);
-                                assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
-                                memset(dstpkt.data,0,out_samples * 2 * output_audio_channels);
-                            }
-                            dstpkt.pts = audio_sample;
-                            dstpkt.dts = audio_sample;
-                            dstpkt.stream_index = output_avstream_audio->index;
-                            av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
-                            if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
-                                fprintf(stderr,"Failed to write frame\n");
-                            av_packet_unref(&dstpkt);
-
-                            fprintf(stderr,"Pad fill %llu samples\n",out_samples);
-                            audio_sample += out_samples;
-                        }
-
-						if (audio_dst_data != NULL && tgt_sample >= audio_sample) {
-							int out_samples;
-
-							if ((out_samples=swr_convert(input_avstream_audio_resampler,audio_dst_data,audio_dst_data_samples,
-								(const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
-								// PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
-                                if (enable_audio_emulation)
-                                    composite_audio_process((int16_t*)audio_dst_data[0],out_samples);
-                                // write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
-								// that way we can render directly to MP4 our VHS emulation.
-								AVPacket dstpkt;
-								av_init_packet(&dstpkt);
-								if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
-									assert(dstpkt.data != NULL);
-									assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
-									memcpy(dstpkt.data,audio_dst_data[0],out_samples * 2 * output_audio_channels);
-								}
-                                dstpkt.pts = audio_sample;
-                                dstpkt.dts = audio_sample;
-								dstpkt.stream_index = output_avstream_audio->index;
-                                av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
-                                if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
-									fprintf(stderr,"Failed to write frame\n");
-								av_packet_unref(&dstpkt);
-
-                                audio_sample += out_samples;
-							}
-							else if (out_samples < 0) {
-								fprintf(stderr,"Failed to resample audio\n");
-							}
-						}
-					}
-				}
-				else {
-					fprintf(stderr,"No audio decoded\n");
-				}
+                got_frame = do_audio_decode_and_render(/*&*/pkt,/*&*/audio_sample) ? 1 : 0;
             } while (got_frame);
         }
 
