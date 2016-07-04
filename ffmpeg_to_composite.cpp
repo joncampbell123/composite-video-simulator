@@ -2120,11 +2120,6 @@ int main(int argc,char **argv) {
 			av_init_packet(&pkt);
 		}
 
-		if (dst_data != NULL) {
-			av_freep(&dst_data[0]); // NTS: Why??
-			av_freep(&dst_data);
-		}
-
         /* the encoder usually has a delay.
          * we need the encoder to flush those frames out. */
         {
@@ -2389,6 +2384,11 @@ int main(int argc,char **argv) {
 				}
             } while (got_frame);
         }
+
+		if (dst_data != NULL) {
+			av_freep(&dst_data[0]); // NTS: Why??
+			av_freep(&dst_data);
+		}
 	}
 
 	if (output_avstream_video_input_frame != NULL)
