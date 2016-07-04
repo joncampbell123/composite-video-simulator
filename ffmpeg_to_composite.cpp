@@ -2107,8 +2107,12 @@ int main(int argc,char **argv) {
                     t = pkt.pts * av_q2d(input_avfmt->streams[pkt.stream_index]->time_base);
                     if (transcode_end >= 0 && t >= transcode_end)
                         break;
-                    if (t < transcode_start)
+
+                    if (t < transcode_start) {
+                        av_packet_unref(&pkt);
+                        av_init_packet(&pkt);
                         continue;
+                    }
 
                     if (pt < 0)
                         adj_time = -t;
@@ -2124,8 +2128,11 @@ int main(int argc,char **argv) {
                     pt = t;
                 }
 
-                if (pt < 0)
+                if (pt < 0) {
+                    av_packet_unref(&pkt);
+                    av_init_packet(&pkt);
                     continue;
+                }
 
                 if (pkt.pts != AV_NOPTS_VALUE) {
                     pkt.pts += (adj_time * input_avfmt->streams[pkt.stream_index]->time_base.den) /
@@ -2159,6 +2166,9 @@ int main(int argc,char **argv) {
 			av_packet_unref(&pkt);
 			av_init_packet(&pkt);
 		}
+
+        av_packet_unref(&pkt);
+        av_init_packet(&pkt);
 
         /* the encoder usually has a delay.
          * we need the encoder to flush those frames out. */
