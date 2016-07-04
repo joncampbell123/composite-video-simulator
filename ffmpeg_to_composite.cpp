@@ -2207,6 +2207,16 @@ int main(int argc,char **argv) {
 	}
 	if (input_avstream_audio_resampler != NULL)
 		swr_free(&input_avstream_audio_resampler);
+    if (input_avstream_audio_codec_context != NULL) {
+        avcodec_close(input_avstream_audio_codec_context);
+        input_avstream_audio_codec_context = NULL;
+        input_avstream_audio = NULL;
+    }
+    if (input_avstream_video_codec_context != NULL) {
+        avcodec_close(input_avstream_video_codec_context);
+        input_avstream_video_codec_context = NULL;
+        input_avstream_video = NULL;
+    }
 	if (output_avfmt != NULL && !(output_avfmt->oformat->flags & AVFMT_NOFILE))
 		avio_closep(&output_avfmt->pb);
 	avformat_free_context(output_avfmt);
