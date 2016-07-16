@@ -270,6 +270,9 @@ bool			vhs_head_switching = false;
 double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
 double			vhs_head_switching_phase_noise = (((1.0 / 300)/*slight error, like most VHS tapes*/) / 262.5); // 1/300th of a scanline
 
+bool            composite_in_chroma_lowpass = true; // apply chroma lowpass before composite encode
+bool            composite_out_chroma_lowpass = true;
+
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int		video_chroma_noise = 0;
@@ -564,7 +567,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
 	unsigned int x,y;
 
-    composite_video_chroma_lowpass(dst,field,fieldno);
+    if (composite_in_chroma_lowpass) composite_video_chroma_lowpass(dst,field,fieldno);
 	composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
 
 	/* video composite preemphasis */
@@ -666,10 +669,8 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		}
 	}
 
-	if (!nocolor_subcarrier) {
+	if (!nocolor_subcarrier)
 		composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude_back);
-        composite_video_chroma_lowpass(dst,field,fieldno);
-    }
 
 	/* add video noise */
 	if (video_chroma_noise != 0) {
@@ -862,7 +863,6 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		if (!vhs_svideo_out) {
 			composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
 			composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude);
-            composite_video_chroma_lowpass(dst,field,fieldno);
 		}
 	}
 
@@ -882,6 +882,9 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 		composite_video_yuv_to_ntsc(dst,field,fieldno,subcarrier_amplitude);
 		composite_ntsc_to_yuv(dst,field,fieldno,subcarrier_amplitude);
 	}
+
+    if (composite_out_chroma_lowpass)
+        composite_video_chroma_lowpass(dst,field,fieldno);
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number,signed long long src_pts) {
@@ -1198,6 +1201,8 @@ static void help(const char *arg0) {
     fprintf(stderr," -ss <t>                   Start transcoding from t seconds\n");
     fprintf(stderr," -se <t>                   Stop transcoding at t seconds\n");
     fprintf(stderr," -t <t>                    Transcode only t seconds\n");
+    fprintf(stderr," -in-composite-lowpass <n> Enable/disable chroma lowpass on composite in\n");
+    fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1217,6 +1222,12 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"in-composite-lowpass")) {
+                composite_in_chroma_lowpass = atoi(argv[i++]) > 0;
+            }
+            else if (!strcmp(a,"out-composite-lowpass")) {
+                composite_out_chroma_lowpass = atoi(argv[i++]) > 0;
+            }
             else if (!strcmp(a,"ss")) {
                 transcode_start = atof(argv[i++]);
             }
