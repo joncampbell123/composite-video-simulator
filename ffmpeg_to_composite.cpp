@@ -272,6 +272,7 @@ double			vhs_head_switching_phase_noise = (((1.0 / 300)/*slight error, like most
 
 bool            composite_in_chroma_lowpass = true; // apply chroma lowpass before composite encode
 bool            composite_out_chroma_lowpass = true;
+bool            composite_out_chroma_lowpass_lite = true;
 
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
@@ -374,6 +375,44 @@ void composite_video_chroma_lowpass(AVFrame *dst,unsigned int field,unsigned lon
 				for (x=0;x < (dst->width/2)/*4:2:2*/;x++) {
 					s = P[x];
 					s += hp.highpass(s);
+					for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+					if (x >= delay) P[x-delay] = clampu8(s);
+				}
+			}
+		}
+	}
+}
+
+void composite_video_chroma_lowpass_lite(AVFrame *dst,unsigned int field,unsigned long long fieldno) {
+    unsigned int x,y;
+
+	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
+		for (unsigned int p=1;p <= 2;p++) {
+			for (y=field;y < dst->height;y += 2) {
+				unsigned char *P = dst->data[p] + (y * dst->linesize[p]);
+				LowpassFilter lp[3];
+				double cutoff;
+				int delay;
+				double s;
+
+				if (output_ntsc) {
+					// NTSC YIQ bandwidth: I=1.3MHz Q=0.6MHz
+					cutoff = (315000000.00 * 4) / (88 * 2 * 4);
+					delay = 1;
+				}
+				else {
+					// PAL: R-Y and B-Y are 1.3MHz
+					cutoff = (315000000.00 * 4) / (88 * 2 * 4);
+					delay = 1;
+				}
+
+				for (unsigned int f=0;f < 3;f++) {
+					lp[f].setFilter((315000000.00 * 4) / (88 * 2),cutoff); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2)  vs 600KHz cutoff
+					lp[f].resetFilter(128);
+				}
+
+				for (x=0;x < (dst->width/2)/*4:2:2*/;x++) {
+					s = P[x];
 					for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
 					if (x >= delay) P[x-delay] = clampu8(s);
 				}
@@ -885,6 +924,8 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
 
     if (composite_out_chroma_lowpass)
         composite_video_chroma_lowpass(dst,field,fieldno);
+    else if (composite_out_chroma_lowpass_lite)
+        composite_video_chroma_lowpass_lite(dst,field,fieldno);
 }
 
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number,signed long long src_pts) {
@@ -1203,6 +1244,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -t <t>                    Transcode only t seconds\n");
     fprintf(stderr," -in-composite-lowpass <n> Enable/disable chroma lowpass on composite in\n");
     fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
+    fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1227,6 +1269,9 @@ static int parse_argv(int argc,char **argv) {
             }
             else if (!strcmp(a,"out-composite-lowpass")) {
                 composite_out_chroma_lowpass = atoi(argv[i++]) > 0;
+            }
+            else if (!strcmp(a,"out-composite-lowpass-lite")) {
+                composite_out_chroma_lowpass_lite = atoi(argv[i++]) > 0;
             }
             else if (!strcmp(a,"ss")) {
                 transcode_start = atof(argv[i++]);
