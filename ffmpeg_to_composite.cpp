@@ -249,6 +249,7 @@ AVStream*		output_avstream_audio = NULL;	// do not free
 AVCodecContext*		output_avstream_audio_codec_context = NULL; // do not free
 AVStream*		output_avstream_video = NULL;	// do not free
 AVCodecContext*		output_avstream_video_codec_context = NULL; // do not free
+AVFrame*        output_avstream_video_filter_frame = NULL;
 AVFrame*		output_avstream_video_input_frame = NULL;   // 4:2:2
 AVFrame*		output_avstream_video_frame = NULL;         // 4:2:2
 
@@ -312,6 +313,9 @@ bool		vhs_chroma_vert_blend = true;		// if set, and VHS, blend vertically the ch
 bool		vhs_svideo_out = false;			// if not set, and VHS, video is recombined as if composite out on VCR
 bool        enable_composite_emulation = true; // if not set, video goes straight back out to the encoder.
 bool        enable_audio_emulation = true;
+
+/* composite keying emulation */
+int         black_key_level_feedback = -1;           // >= 0 key against black on render
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -928,6 +932,53 @@ void composite_video_process(AVFrame *dst,unsigned int field,unsigned long long 
         composite_video_chroma_lowpass_lite(dst,field,fieldno);
 }
 
+void black_key(unsigned char *dY,unsigned char *dU,unsigned char *dV,unsigned char *fY,unsigned char *fU,unsigned char *fV,bool wchroma) {
+    int dLuma = *dY - (16 + black_key_level_feedback);
+    int dChroma = abs(((int)(*dU)) + ((int)(*dV)) - 256) - black_key_level_feedback;
+    int d = dLuma + dChroma;
+
+    if (d <= 0) {
+        *dY = *fY;
+        if (wchroma) {
+            *dU = *fU;
+            *dV = *fV;
+        }
+    }
+
+    *fY = *dY;
+    if (wchroma) {
+        *fU = *dU;
+        *fV = *dV;
+    }
+}
+
+void black_key_feedback(AVFrame *dst,AVFrame *flt,unsigned int field,unsigned long long field_number) {
+    unsigned char *dY,*dU,*dV;
+    unsigned char *fY,*fU,*fV;
+    unsigned int x,y;
+
+    // assume 4:2:2
+	for (y=field;y < dst->height;y += 2) {
+        dY = dst->data[0] + (y * dst->linesize[0]);
+        dU = dst->data[1] + (y * dst->linesize[1]);
+        dV = dst->data[2] + (y * dst->linesize[2]);
+        fY = flt->data[0] + (y * flt->linesize[0]);
+        fU = flt->data[1] + (y * flt->linesize[1]);
+        fV = flt->data[2] + (y * flt->linesize[2]);
+
+        for (x=0;x < dst->width;x += 2) {
+            black_key(dY+0,dU,dV,fY+0,fU,fV,true);
+            black_key(dY+1,dU,dV,fY+1,fU,fV,false);
+            dY += 2;
+            dU++;
+            dV++;
+            fY += 2;
+            fU++;
+            fV++;
+        }
+    }
+}
+
 void render_field(AVFrame *dst,AVFrame *src,unsigned int field,unsigned long long field_number,signed long long src_pts) {
 	unsigned int y,sy,sy2,syf,csy,csy2,csyf;
     unsigned int chroma_height;
@@ -1245,6 +1296,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -in-composite-lowpass <n> Enable/disable chroma lowpass on composite in\n");
     fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
     fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
+    fprintf(stderr," -bkey-feedback <n>        Black key feedback (black level <= N)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1264,6 +1316,9 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"bkey-feedback")) {
+                black_key_level_feedback = atoi(argv[i++]);
+            }
             else if (!strcmp(a,"in-composite-lowpass")) {
                 composite_in_chroma_lowpass = atoi(argv[i++]) > 0;
             }
@@ -1691,6 +1746,9 @@ bool do_video_decode_and_render(AVPacket &pkt,unsigned long long &video_field) {
                 while (video_field < tgt_field) {
                     render_field(output_avstream_video_frame,output_avstream_video_input_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field,tgt_pts);
 
+                    if (black_key_level_feedback >= 0)
+                        black_key_feedback(output_avstream_video_frame,output_avstream_video_filter_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
+
                     if (enable_composite_emulation)
                         composite_video_process(output_avstream_video_frame,(int)(video_field & 1ULL) ^ 1/*bottom field first*/,video_field);
 
@@ -2099,6 +2157,25 @@ int main(int argc,char **argv) {
 			return 1;
 		}
 
+		/* prepare video filtering */
+		output_avstream_video_filter_frame = av_frame_alloc();
+		if (output_avstream_video_filter_frame == NULL) {
+			fprintf(stderr,"Failed to alloc video frame\n");
+			return 1;
+		}
+		av_frame_set_colorspace(output_avstream_video_filter_frame,AVCOL_SPC_SMPTE170M);
+		av_frame_set_color_range(output_avstream_video_filter_frame,AVCOL_RANGE_MPEG);
+		output_avstream_video_filter_frame->format = AV_PIX_FMT_YUV422P;
+		output_avstream_video_filter_frame->height = output_height;
+		output_avstream_video_filter_frame->width = output_width;
+		if (av_frame_get_buffer(output_avstream_video_filter_frame,64) < 0) {
+			fprintf(stderr,"Failed to alloc render frame\n");
+			return 1;
+		}
+        memset(output_avstream_video_filter_frame->data[0],16,output_avstream_video_filter_frame->linesize[0] * output_avstream_video_filter_frame->height);
+        memset(output_avstream_video_filter_frame->data[1],128,output_avstream_video_filter_frame->linesize[1] * output_avstream_video_filter_frame->height);
+        memset(output_avstream_video_filter_frame->data[2],128,output_avstream_video_filter_frame->linesize[2] * output_avstream_video_filter_frame->height);
+
 		if (!output_video_as_interlaced || !use_422_colorspace) {
 			output_avstream_video_bob_frame = av_frame_alloc();
 			if (output_avstream_video_bob_frame == NULL) {
@@ -2223,6 +2300,8 @@ int main(int argc,char **argv) {
 		av_frame_free(&output_avstream_video_input_frame);
 	if (output_avstream_video_bob_frame != NULL)
 		av_frame_free(&output_avstream_video_bob_frame);
+	if (output_avstream_video_filter_frame != NULL)
+		av_frame_free(&output_avstream_video_filter_frame);
 	if (output_avstream_video_frame != NULL)
 		av_frame_free(&output_avstream_video_frame);
 	if (input_avstream_video_frame != NULL)
