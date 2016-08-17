@@ -976,6 +976,11 @@ int main(int argc,char **argv) {
         }
     }
 
+    // zero the frame ONCE.
+    // what we want is, if a threshhold is given for the first input file,
+    // that it means the user wants us to cause a "hall of mirrors" effect where keying happens.
+    memset(output_avstream_video_frame->data[0],0,output_avstream_video_frame->linesize[0]*output_avstream_video_frame->height);
+
     /* run all inputs and render to output, until done */
     {
         bool eof,copyaud;
@@ -1039,11 +1044,6 @@ int main(int argc,char **argv) {
             }
 
             while (current <= upto) {
-                // compose frame. first layer is always as-is.
-                // this code is written for ARGB compositing.
-                // in FFMPEG terms this is one plane.
-                memset(output_avstream_video_frame->data[0],0,output_avstream_video_frame->linesize[0]*output_avstream_video_frame->height);
-
                 for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                     if ((*i).eof == false) {
                         if ((*i).got_video) {
