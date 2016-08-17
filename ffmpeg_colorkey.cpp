@@ -978,7 +978,7 @@ int main(int argc,char **argv) {
 
     /* run all inputs and render to output, until done */
     {
-        bool eof;
+        bool eof,copyaud;
         signed long long upto=0;
         signed long long current=0;
 
@@ -986,6 +986,7 @@ int main(int argc,char **argv) {
             if (DIE) break;
 
             eof = true;
+            copyaud = false;
             for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                 if ((*i).eof == false) {
                     eof = false;
@@ -994,7 +995,8 @@ int main(int argc,char **argv) {
 
                     if ((*i).got_audio) {
                         /* we don't do anything with audio, but we do copy through the first input file's audio */
-                        if (i == input_files.begin()) {
+                        if (!copyaud) {
+                            copyaud = true;
                             process_audio((*i)); // NTS: We do chroma/color keying, we don't do anything with audio
                             write_out_audio((*i));
                         }
