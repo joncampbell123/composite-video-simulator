@@ -1090,6 +1090,28 @@ int main(int argc,char **argv) {
         } while (!eof);
     }
 
+    /* flush encoder delay */
+    do {
+        AVPacket pkt;
+        int gotit=0;
+
+        av_init_packet(&pkt);
+        if (av_new_packet(&pkt,50000000/8) < 0) break;
+
+        if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,NULL,&gotit) == 0) {
+            if (gotit) {
+                pkt.stream_index = output_avstream_video->index;
+                av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+
+                if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
+                    fprintf(stderr,"AV write frame failed video\n");
+            }
+        }
+
+        av_packet_unref(&pkt);
+        if (!gotit) break;
+    } while (1);
+
     /* close output */
     if (output_avstream_video_resampler != NULL) {
         sws_freeContext(output_avstream_video_resampler);
