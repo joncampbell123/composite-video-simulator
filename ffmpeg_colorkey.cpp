@@ -62,7 +62,7 @@ struct SwsContext*          output_avstream_video_resampler = NULL;
 
 class InputFile {
 public:
-    InputFile() : threshhold(8), color(RGBTRIPLET(0,0,0)/*BLACK*/) {
+    InputFile() : threshhold(0), color(RGBTRIPLET(0,0,0)/*BLACK*/) {
         input_avfmt = NULL;
         audio_dst_data = NULL;
         input_avstream_audio = NULL;
@@ -178,7 +178,7 @@ public:
                 close_input();
                 return 1;
             }
-            input_avstream_video_frame_rgb->format = AV_PIX_FMT_ARGB;
+            input_avstream_video_frame_rgb->format = AV_PIX_FMT_BGRA;
             input_avstream_video_frame_rgb->height = output_height;
             input_avstream_video_frame_rgb->width = output_width;
             if (av_frame_get_buffer(input_avstream_video_frame_rgb,64) < 0) {
@@ -186,6 +186,7 @@ public:
                 close_input();
                 return 1;
             }
+            memset(input_avstream_video_frame_rgb->data[0],0,input_avstream_video_frame_rgb->linesize[0]*input_avstream_video_frame_rgb->height);
         }
 
         input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
@@ -360,13 +361,6 @@ public:
         }
     }
     void frame_copy_scale(void) {
-        if (input_avstream_video_frame_rgb != NULL) {
-            if (input_avstream_video_frame_rgb->height != input_avstream_video_frame->height) {
-                if (input_avstream_video_frame_rgb != NULL)
-                    av_frame_free(&input_avstream_video_frame_rgb);
-            }
-        }
-
         if (input_avstream_video_frame_rgb == NULL) {
             fprintf(stderr,"New input frame\n");
             input_avstream_video_frame_rgb = av_frame_alloc();
@@ -375,13 +369,14 @@ public:
                 return;
             }
 
-            input_avstream_video_frame_rgb->format = AV_PIX_FMT_ARGB;
-            input_avstream_video_frame_rgb->height = input_avstream_video_frame->height;
+            input_avstream_video_frame_rgb->format = AV_PIX_FMT_BGRA;
+            input_avstream_video_frame_rgb->height = output_height;
             input_avstream_video_frame_rgb->width = output_width;
             if (av_frame_get_buffer(input_avstream_video_frame_rgb,64) < 0) {
                 fprintf(stderr,"Failed to alloc render frame\n");
                 return;
             }
+            memset(input_avstream_video_frame_rgb->data[0],0,input_avstream_video_frame_rgb->linesize[0]*input_avstream_video_frame_rgb->height);
         }
 
         if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
@@ -768,6 +763,36 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
+// This code assumes ARGB and the frame match resolution/
+void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
+    uint32_t *dscan,*sscan;
+    unsigned int x,y;
+    int dR,dG,dB,d;
+
+    if (dstframe == NULL || srcframe == NULL) return;
+    if (dstframe->data[0] == NULL || srcframe->data[0] == 0) return;
+    if (dstframe->linesize[0] < (dstframe->width*4)) return; // ARGB
+    if (srcframe->linesize[0] < (srcframe->width*4)) return; // ARGB
+    if (dstframe->width != srcframe->width) return;
+    if (dstframe->height != srcframe->height) return;
+
+    for (y=0;y < dstframe->height;y++) {
+        sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
+        dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
+        for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
+            // if the source pixel is within the key threshhold, then do not copy the pixel.
+            // else, copy the pixel.
+            // very crude color keying, by design. it looks very "retro".
+            // run the source file through the composite video simulator first and it will look like 1980's green-screen compositing.
+            dR = (*sscan >> 16UL) & 0xFF; dR -= (inputfile.color >> 16UL) & 0xFF;
+            dG = (*sscan >>  8UL) & 0xFF; dG -= (inputfile.color >>  8UL) & 0xFF;
+            dB = (*sscan >>  0UL) & 0xFF; dB -= (inputfile.color >>  0UL) & 0xFF;
+            d = abs(dR) + abs(dG) + abs(dB);
+            if (d >= inputfile.threshhold) *dscan = *sscan;
+        }
+    }
+}
+
 int main(int argc,char **argv) {
     preset_NTSC();
     if (parse_argv(argc,argv))
@@ -882,7 +907,7 @@ int main(int argc,char **argv) {
         fprintf(stderr,"Failed to alloc video frame\n");
         return 1;
     }
-    output_avstream_video_frame->format = AV_PIX_FMT_ARGB;
+    output_avstream_video_frame->format = AV_PIX_FMT_BGRA;
     output_avstream_video_frame->height = output_height;
     output_avstream_video_frame->width = output_width;
     if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
@@ -1000,7 +1025,8 @@ int main(int argc,char **argv) {
                         }
                     }
 
-                    // composite the layers
+                    // composite the layer, keying against the color. all code assumes ARGB
+                    composite_layer(output_avstream_video_frame,(*i).input_avstream_video_frame_rgb,*i);
                 }
 
                 // convert ARGB to whatever the codec demands, and encode
