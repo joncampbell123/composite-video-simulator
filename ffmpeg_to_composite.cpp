@@ -552,6 +552,16 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 
 			s = (double)audio[c] / 32768;
 
+			/* lowpass filter */
+			s = audio_hilopass.audiostate[c].filter(s);
+
+			/* preemphasis */
+			if (emulating_preemphasis) {
+				for (unsigned int i=0;i < output_audio_channels;i++) {
+					s = s + audio_linear_preemphasis_pre[i].highpass(s);
+				}
+			}
+
 			/* that faint "buzzing" noise on linear tracks because of audio/video crosstalk */
 			if (!output_vhs_hifi && linear_buzz > 0.000000001) {
 				const unsigned int oversample = 16;
@@ -568,16 +578,6 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 
 					if (pulse)
 						s -= linear_buzz / oversample / 2;
-				}
-			}
-
-			/* lowpass filter */
-			s = audio_hilopass.audiostate[c].filter(s);
-
-			/* preemphasis */
-			if (emulating_preemphasis) {
-				for (unsigned int i=0;i < output_audio_channels;i++) {
-					s = s + audio_linear_preemphasis_pre[i].highpass(s);
 				}
 			}
 
