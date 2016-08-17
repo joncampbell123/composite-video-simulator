@@ -1015,6 +1015,12 @@ int main(int argc,char **argv) {
                         upto = current;
                     }
                 }
+                else {
+                    if ((*i).got_video) {
+                        (*i).frame_copy_scale();
+                        (*i).got_video = false;
+                    }
+                }
             }
 
             while (current <= upto) {
@@ -1035,6 +1041,12 @@ int main(int argc,char **argv) {
                             else {
                                 (*i).got_video = false;
                             }
+                        }
+                    }
+                    else {
+                        if ((*i).got_video) {
+                            (*i).frame_copy_scale();
+                            (*i).got_video = false;
                         }
                     }
 
