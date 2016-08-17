@@ -57,8 +57,8 @@ AVCodecContext*		        output_avstream_audio_codec_context = NULL; // do not f
 AVStream*		            output_avstream_video = NULL;	// do not free
 AVCodecContext*		        output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		            output_avstream_video_frame = NULL;         // ARGB
-AVFrame*		            output_avstream_video_bob_frame = NULL;     // ARGB
 AVFrame*		            output_avstream_video_encode_frame = NULL;  // 4:2:2 or 4:2:0
+struct SwsContext*          output_avstream_video_resampler = NULL;
 
 class InputFile {
 public:
@@ -188,6 +188,9 @@ public:
             }
         }
 
+        input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
+        input_avstream_video_resampler_height = -1;
+        input_avstream_video_resampler_width = -1;
         last_written_sample = 0;
         audio_dst_data_out_audio_sample = 0;
         audio_sample = 0;
@@ -252,6 +255,8 @@ public:
                     input_avfmt->streams[avpkt.stream_index]->time_base.num;
             }
 
+            got_audio = false;
+            got_video = false;
 			if (input_avstream_audio != NULL && avpkt.stream_index == input_avstream_audio->index) {
                 if (got_audio) fprintf(stderr,"Audio content lost\n");
 				av_packet_rescale_ts(&avpkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
@@ -263,8 +268,7 @@ public:
                 if (got_video) fprintf(stderr,"Video content lost\n");
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&avpkt,input_avstream_video->time_base,m); // convert to FIELD number
-                handle_frame(/*&*/avpkt);
-                got_video = true;
+                handle_frame(/*&*/avpkt); // will set got_video
                 break;
 			}
 
@@ -278,21 +282,6 @@ public:
 
         if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
             if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
-                unsigned long long tgt_sample = input_avstream_audio_frame->pts;
-                if (tgt_sample == AV_NOPTS_VALUE) tgt_sample = pkt.pts;
-
-                if (tgt_sample == AV_NOPTS_VALUE)
-                    tgt_sample = audio_sample; // don't want me to guess? give me PTS timestamps then!
-                else {
-                    if ((signed long long)tgt_sample < 0LL) tgt_sample = 0LL;
-
-                    // deal with imperfections, prevent them from making an unstable frame rate
-                    signed long long d = (signed long long)tgt_sample - (signed long long)audio_sample;
-
-                    if (llabs(d) < (output_audio_rate/30) && tgt_sample < audio_sample)
-                        tgt_sample = audio_sample;
-                }
-
                 if (input_avstream_audio_frame->pts == AV_NOPTS_VALUE)
                     input_avstream_audio_frame->pts = pkt.pts;
 
@@ -370,7 +359,93 @@ public:
             }
         }
     }
+    void frame_copy_scale(void) {
+        if (input_avstream_video_frame_rgb != NULL) {
+            if (input_avstream_video_frame_rgb->height != input_avstream_video_frame->height) {
+                if (input_avstream_video_frame_rgb != NULL)
+                    av_frame_free(&input_avstream_video_frame_rgb);
+            }
+        }
+
+        if (input_avstream_video_frame_rgb == NULL) {
+            fprintf(stderr,"New input frame\n");
+            input_avstream_video_frame_rgb = av_frame_alloc();
+            if (input_avstream_video_frame_rgb == NULL) {
+                fprintf(stderr,"Failed to alloc video frame\n");
+                return;
+            }
+
+            input_avstream_video_frame_rgb->format = AV_PIX_FMT_ARGB;
+            input_avstream_video_frame_rgb->height = input_avstream_video_frame->height;
+            input_avstream_video_frame_rgb->width = output_width;
+            if (av_frame_get_buffer(input_avstream_video_frame_rgb,64) < 0) {
+                fprintf(stderr,"Failed to alloc render frame\n");
+                return;
+            }
+        }
+
+        if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
+            if (input_avstream_video_resampler_format != input_avstream_video_frame->format ||
+                    input_avstream_video_resampler_width != input_avstream_video_frame->width ||
+                    input_avstream_video_resampler_height != input_avstream_video_frame->height) {
+                sws_freeContext(input_avstream_video_resampler);
+                input_avstream_video_resampler = NULL;
+            }
+        }
+
+        if (input_avstream_video_resampler == NULL) {
+            input_avstream_video_resampler = sws_getContext(
+                    // source
+                    input_avstream_video_frame->width,
+                    input_avstream_video_frame->height,
+                    (AVPixelFormat)input_avstream_video_frame->format,
+                    // dest
+                    input_avstream_video_frame_rgb->width,
+                    input_avstream_video_frame_rgb->height,
+                    (AVPixelFormat)input_avstream_video_frame_rgb->format,
+                    // opt
+                    SWS_BILINEAR, NULL, NULL, NULL);
+
+            if (input_avstream_video_resampler != NULL) {
+                fprintf(stderr,"sws_getContext new context\n");
+                input_avstream_video_resampler_format = (AVPixelFormat)input_avstream_video_frame->format;
+                input_avstream_video_resampler_width = input_avstream_video_frame->width;
+                input_avstream_video_resampler_height = input_avstream_video_frame->height;
+            }
+            else {
+                fprintf(stderr,"sws_getContext fail\n");
+            }
+        }
+
+        if (input_avstream_video_resampler != NULL) {
+            input_avstream_video_frame_rgb->pts = input_avstream_video_frame->pts;
+            input_avstream_video_frame_rgb->pkt_pts = input_avstream_video_frame->pkt_pts;
+            input_avstream_video_frame_rgb->pkt_dts = input_avstream_video_frame->pkt_dts;
+            input_avstream_video_frame_rgb->top_field_first = input_avstream_video_frame->top_field_first;
+            input_avstream_video_frame_rgb->interlaced_frame = input_avstream_video_frame->interlaced_frame;
+
+            if (sws_scale(input_avstream_video_resampler,
+                        // source
+                        input_avstream_video_frame->data,
+                        input_avstream_video_frame->linesize,
+                        0,input_avstream_video_frame->height,
+                        // dest
+                        input_avstream_video_frame_rgb->data,
+                        input_avstream_video_frame_rgb->linesize) <= 0)
+                fprintf(stderr,"WARNING: sws_scale failed\n");
+        }
+    }
     void handle_frame(AVPacket &pkt) {
+        int got_frame = 0;
+
+        if (avcodec_decode_video2(input_avstream_video_codec_context,input_avstream_video_frame,&got_frame,&pkt) >= 0) {
+            if (got_frame != 0 && input_avstream_video_frame->width > 0 && input_avstream_video_frame->height > 0) {
+                got_video = true;
+            }
+        }
+        else {
+            fprintf(stderr,"No video decoded\n");
+        }
     }
     void avpkt_init(void) {
         if (!avpkt_valid) {
@@ -451,6 +526,9 @@ public:
     AVFrame*		        input_avstream_video_frame_rgb;
     struct SwrContext*      input_avstream_audio_resampler;
     struct SwsContext*	    input_avstream_video_resampler;
+    AVPixelFormat           input_avstream_video_resampler_format;
+    int                     input_avstream_video_resampler_height;
+    int                     input_avstream_video_resampler_width;
     signed long long        next_pts;
     signed long long        next_dts;
     AVPacket                avpkt;
@@ -654,7 +732,40 @@ void write_out_audio(InputFile &fin) {
         fprintf(stderr,"Failed to write frame\n");
     av_packet_unref(&dstpkt);
 
-    fin.last_written_sample = fin.audio_sample;
+    fin.audio_sample = fin.last_written_sample = fin.audio_dst_data_out_audio_sample + fin.audio_dst_data_out_samples;
+}
+
+void output_frame(AVFrame *frame,unsigned long long field_number) {
+	int gotit = 0;
+	AVPacket pkt;
+
+	av_init_packet(&pkt);
+	if (av_new_packet(&pkt,50000000/8) < 0) {
+		fprintf(stderr,"Failed to alloc vid packet\n");
+		return;
+	}
+
+	frame->key_frame = (field_number % (15ULL * 2ULL)) == 0 ? 1 : 0;
+
+    {
+		frame->interlaced_frame = 0;
+		frame->pts = field_number;
+		pkt.pts = field_number;
+		pkt.dts = field_number;
+	}
+
+	fprintf(stderr,"\x0D" "Output field %llu ",field_number); fflush(stderr);
+    if (avcodec_encode_video2(output_avstream_video_codec_context,&pkt,frame,&gotit) == 0) {
+        if (gotit) {
+            pkt.stream_index = output_avstream_video->index;
+            av_packet_rescale_ts(&pkt,output_avstream_video_codec_context->time_base,output_avstream_video->time_base);
+
+            if (av_interleaved_write_frame(output_avfmt,&pkt) < 0)
+                fprintf(stderr,"AV write frame failed video\n");
+        }
+    }
+
+	av_packet_unref(&pkt);
 }
 
 int main(int argc,char **argv) {
@@ -780,28 +891,13 @@ int main(int argc,char **argv) {
     }
 
     {
-        output_avstream_video_bob_frame = av_frame_alloc();
-        if (output_avstream_video_bob_frame == NULL) {
-            fprintf(stderr,"Failed to alloc video frame2\n");
-            return 1;
-        }
-        output_avstream_video_bob_frame->format = AV_PIX_FMT_ARGB;
-        output_avstream_video_bob_frame->height = output_height;
-        output_avstream_video_bob_frame->width = output_width;
-        if (av_frame_get_buffer(output_avstream_video_bob_frame,64) < 0) {
-            fprintf(stderr,"Failed to alloc render frame2\n");
-            return 1;
-        }
-    }
-
-    {
         output_avstream_video_encode_frame = av_frame_alloc();
         if (output_avstream_video_encode_frame == NULL) {
             fprintf(stderr,"Failed to alloc video frame3\n");
             return 1;
         }
-        av_frame_set_colorspace(output_avstream_video_bob_frame,AVCOL_SPC_SMPTE170M);
-        av_frame_set_color_range(output_avstream_video_bob_frame,AVCOL_RANGE_MPEG);
+        av_frame_set_colorspace(output_avstream_video_encode_frame,AVCOL_SPC_SMPTE170M);
+        av_frame_set_color_range(output_avstream_video_encode_frame,AVCOL_RANGE_MPEG);
         output_avstream_video_encode_frame->format = output_avstream_video_codec_context->pix_fmt;
         output_avstream_video_encode_frame->height = output_height;
         output_avstream_video_encode_frame->width = output_width;
@@ -811,9 +907,29 @@ int main(int argc,char **argv) {
         }
     }
 
+    if (output_avstream_video_resampler == NULL) {
+        output_avstream_video_resampler = sws_getContext(
+                // source
+                output_avstream_video_frame->width,
+                output_avstream_video_frame->height,
+                (AVPixelFormat)output_avstream_video_frame->format,
+                // dest
+                output_avstream_video_encode_frame->width,
+                output_avstream_video_encode_frame->height,
+                (AVPixelFormat)output_avstream_video_encode_frame->format,
+                // opt
+                SWS_BILINEAR, NULL, NULL, NULL);
+        if (output_avstream_video_resampler == NULL) {
+            fprintf(stderr,"Failed to alloc ARGB -> codec converter\n");
+            return 1;
+        }
+    }
+
     /* run all inputs and render to output, until done */
     {
-        bool eof = false;
+        bool eof;
+        signed long long upto=0;
+        signed long long current=0;
 
         do {
             if (DIE) break;
@@ -821,6 +937,7 @@ int main(int argc,char **argv) {
             eof = true;
             for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                 if ((*i).eof == false) {
+                    eof = false;
                     if (!((*i).got_audio) && !((*i).got_video))
                         (*i).next_packet();
 
@@ -832,21 +949,90 @@ int main(int argc,char **argv) {
                         }
                         (*i).got_audio = false;
                     }
-                    if ((*i).got_video) {
+                }
+            }
+
+            upto = -1LL;
+            for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
+                if ((*i).eof == false) {
+                    if ((*i).input_avstream_video_frame != NULL) {
+                        if ((*i).input_avstream_video_frame->pkt_pts != AV_NOPTS_VALUE) {
+                            if (upto == (-1LL) || upto > (*i).input_avstream_video_frame->pkt_pts)
+                                upto = (*i).input_avstream_video_frame->pkt_pts;
+
+                            if ((*i).got_video) {
+                                if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
+                                    (*i).frame_copy_scale();
+                                    (*i).got_video = false;
+                                }
+                            }
+                        }
+                        else {
+                            (*i).got_video = false;
+                            upto = current;
+                        }
+                    }
+                    else {
                         (*i).got_video = false;
+                        upto = current;
                     }
                 }
+            }
 
-                if ((*i).eof == false) eof = false;
+            while (current <= upto) {
+                // compose frame. first layer is always as-is.
+                // this code is written for ARGB compositing.
+                // in FFMPEG terms this is one plane.
+                memset(output_avstream_video_frame->data[0],0,output_avstream_video_frame->linesize[0]*output_avstream_video_frame->height);
+
+                for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
+                    if ((*i).eof == false) {
+                        if ((*i).got_video) {
+                            if ((*i).input_avstream_video_frame != NULL) {
+                                if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
+                                    (*i).frame_copy_scale();
+                                    (*i).got_video = false;
+                                }
+                            }
+                            else {
+                                (*i).got_video = false;
+                            }
+                        }
+                    }
+
+                    // composite the layers
+                }
+
+                // convert ARGB to whatever the codec demands, and encode
+                output_avstream_video_encode_frame->pts = output_avstream_video_frame->pts;
+                output_avstream_video_encode_frame->pkt_pts = output_avstream_video_frame->pkt_pts;
+                output_avstream_video_encode_frame->pkt_dts = output_avstream_video_frame->pkt_dts;
+                output_avstream_video_encode_frame->top_field_first = output_avstream_video_frame->top_field_first;
+                output_avstream_video_encode_frame->interlaced_frame = output_avstream_video_frame->interlaced_frame;
+
+                if (sws_scale(output_avstream_video_resampler,
+                            // source
+                            output_avstream_video_frame->data,
+                            output_avstream_video_frame->linesize,
+                            0,output_avstream_video_frame->height,
+                            // dest
+                            output_avstream_video_encode_frame->data,
+                            output_avstream_video_encode_frame->linesize) <= 0)
+                    fprintf(stderr,"WARNING: sws_scale failed\n");
+
+                output_frame(output_avstream_video_encode_frame,current);
+                current++;
             }
         } while (!eof);
     }
 
     /* close output */
-	if (output_avstream_video_encode_frame != NULL)
+    if (output_avstream_video_resampler != NULL) {
+        sws_freeContext(output_avstream_video_resampler);
+        output_avstream_video_resampler = NULL;
+    }
+    if (output_avstream_video_encode_frame != NULL)
 		av_frame_free(&output_avstream_video_encode_frame);
-	if (output_avstream_video_bob_frame != NULL)
-		av_frame_free(&output_avstream_video_bob_frame);
 	if (output_avstream_video_frame != NULL)
 		av_frame_free(&output_avstream_video_frame);
 	av_write_trailer(output_avfmt);
