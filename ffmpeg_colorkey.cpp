@@ -76,6 +76,7 @@ public:
         input_avstream_video_codec_context = NULL;
         next_pts = next_dts = -1LL;
         avpkt_valid = false;
+        eof_stream = false;
         eof = false;
     }
     ~InputFile() {
@@ -202,6 +203,7 @@ public:
         audio_dst_data_out_samples = 0;
         input_avstream_audio_resampler_channels = -1;
         input_avstream_audio_resampler_rate = -1;
+        eof_stream = false;
         got_audio = false;
         got_video = false;
         adj_time = 0;
@@ -216,10 +218,11 @@ public:
         if (input_avfmt == NULL) return false;
 
         do {
+            if (eof_stream) break;
             avpkt_release();
             avpkt_init();
             if (av_read_frame(input_avfmt,&avpkt) < 0) {
-                eof = true;
+                eof_stream = true;
                 return false;
             }
             if (avpkt.stream_index >= input_avfmt->nb_streams)
@@ -275,6 +278,15 @@ public:
 
             avpkt_release();
         } while (1);
+
+        if (eof_stream) {
+            avpkt_release();
+            avpkt.size = 0;
+            avpkt.data = NULL;
+            handle_frame(/*&*/avpkt); // will set got_video
+            if (!got_video) eof = true;
+            else fprintf(stderr,"Got latent frame\n");
+        }
 
         return true;
     }
@@ -499,6 +511,7 @@ public:
     int                     threshhold;
     bool                    invert;
     bool                    eof;
+    bool                    eof_stream;
     bool                    got_audio;
     bool                    got_video;
 public:
