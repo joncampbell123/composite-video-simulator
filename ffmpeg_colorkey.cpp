@@ -612,6 +612,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -threshhold <n>               Color key threshhold\n");
     fprintf(stderr," -inv <n>                      If set, invert key\n");
     fprintf(stderr," -noise <n>                    If set, keyed out sections still pass through by random\n");
+    fprintf(stderr," -width <w>                    Width in pixels\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -627,6 +628,12 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+            }
+            else if (!strcmp(a,"width")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                output_width = (int)strtoul(a,NULL,0);
+                if (output_width < 32) return 1;
             }
             else if (!strcmp(a,"noise")) {
                 a = argv[i++];
