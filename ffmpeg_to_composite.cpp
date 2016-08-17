@@ -15,6 +15,8 @@
 // After processing audio, allow encode through non-PCM codec and write to output.
 //
 // After processing video, allow encode through non-uncompressed codec and write to output.
+//
+// At some point, this code should do PROPER processing in the NTSC YIQ colorspace instead of using the YUV colorspace to fake it.
 
 #define __STDC_CONSTANT_MACROS
 
