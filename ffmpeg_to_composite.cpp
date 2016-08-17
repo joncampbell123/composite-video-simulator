@@ -1251,7 +1251,7 @@ void preset_NTSC() {
 	output_pal = false;
 	output_ntsc = true;
 }
-	
+
 static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>\n");
