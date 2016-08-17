@@ -62,7 +62,7 @@ struct SwsContext*          output_avstream_video_resampler = NULL;
 
 class InputFile {
 public:
-    InputFile() : threshhold(0), color(RGBTRIPLET(0,0,0)/*BLACK*/) {
+    InputFile() : threshhold(0), invert(false), color(RGBTRIPLET(0,0,0)/*BLACK*/) {
         input_avfmt = NULL;
         audio_dst_data = NULL;
         input_avstream_audio = NULL;
@@ -497,6 +497,7 @@ public:
     std::string             path;
     uint32_t                color;
     int                     threshhold;
+    bool                    invert;
     bool                    eof;
     bool                    got_audio;
     bool                    got_video;
@@ -594,6 +595,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -o <output file>\n");
     fprintf(stderr," -color <0xRRGGBB>             Color to key against 0xRRGGBB hexadecimal\n");
     fprintf(stderr," -threshhold <n>               Color key threshhold\n");
+    fprintf(stderr," -inv <n>                      If set, invert key\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -609,6 +611,11 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+            }
+            else if (!strcmp(a,"inv")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                current_input_file().invert = (int)strtoul(a,NULL,0) > 0;
             }
             else if (!strcmp(a,"threshhold")) {
                 a = argv[i++];
@@ -788,7 +795,13 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
             dG = (*sscan >>  8UL) & 0xFF; dG -= (inputfile.color >>  8UL) & 0xFF;
             dB = (*sscan >>  0UL) & 0xFF; dB -= (inputfile.color >>  0UL) & 0xFF;
             d = abs(dR) + abs(dG) + abs(dB);
-            if (d >= inputfile.threshhold) *dscan = *sscan;
+
+            if (inputfile.invert) {
+                if (d < inputfile.threshhold) *dscan = *sscan;
+            }
+            else {
+                if (d >= inputfile.threshhold) *dscan = *sscan;
+            }
         }
     }
 }
