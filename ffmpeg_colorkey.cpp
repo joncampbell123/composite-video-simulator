@@ -1035,15 +1035,15 @@ int main(int argc,char **argv) {
             for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                 if ((*i).eof == false) {
                     if ((*i).input_avstream_video_frame != NULL) {
-                        if ((*i).input_avstream_video_frame->pkt_pts != AV_NOPTS_VALUE) {
-                            if (upto == (-1LL) || upto > (*i).input_avstream_video_frame->pkt_pts)
-                                upto = (*i).input_avstream_video_frame->pkt_pts;
+                        if ((*i).got_video) {
+                            if ((*i).input_avstream_video_frame->pkt_pts != AV_NOPTS_VALUE) {
+                                if (upto == (-1LL) || upto > (*i).input_avstream_video_frame->pkt_pts)
+                                    upto = (*i).input_avstream_video_frame->pkt_pts;
+                            }
 
-                            if ((*i).got_video) {
-                                if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
-                                    (*i).frame_copy_scale();
-                                    (*i).got_video = false;
-                                }
+                            if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
+                                (*i).frame_copy_scale();
+                                (*i).got_video = false;
                             }
                         }
                         else {
@@ -1067,8 +1067,8 @@ int main(int argc,char **argv) {
             while (current <= upto) {
                 for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                     if ((*i).eof == false) {
-                        if ((*i).got_video) {
-                            if ((*i).input_avstream_video_frame != NULL) {
+                        if ((*i).input_avstream_video_frame != NULL) {
+                            if ((*i).got_video) {
                                 if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
                                     (*i).frame_copy_scale();
                                     (*i).got_video = false;
@@ -1077,6 +1077,10 @@ int main(int argc,char **argv) {
                             else {
                                 (*i).got_video = false;
                             }
+                        }
+                        else {
+                            (*i).got_video = false;
+                            upto = current;
                         }
                     }
                     else {
