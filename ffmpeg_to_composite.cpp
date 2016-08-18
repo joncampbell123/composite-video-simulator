@@ -2262,6 +2262,9 @@ int main(int argc,char **argv) {
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&pkt,input_avstream_video->time_base,m); // convert to FIELD number
 
+                // ugh... this can happen if the source is an AVI file
+                if (pkt.pts == AV_NOPTS_VALUE) pkt.pts = pkt.dts;
+
                 input_avstream_video_codec_context->reordered_opaque = av_frame_counter;
                 {
                     AVDelayedFrameInfo &d = AVDelayed[av_frame_counter];

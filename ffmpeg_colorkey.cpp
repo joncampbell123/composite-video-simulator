@@ -273,6 +273,10 @@ public:
                 if (got_video) fprintf(stderr,"Video content lost\n");
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&avpkt,input_avstream_video->time_base,m); // convert to FIELD number
+
+                // ugh... this can happen if the source is an AVI file
+                if (avpkt.pts == AV_NOPTS_VALUE) avpkt.pts = avpkt.dts;
+
                 handle_frame(/*&*/avpkt); // will set got_video
                 break;
 			}
@@ -1064,7 +1068,7 @@ int main(int argc,char **argv) {
                 }
             }
 
-            while (current <= upto) {
+            while (current < upto) {
                 for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                     if ((*i).eof == false) {
                         if ((*i).input_avstream_video_frame != NULL) {
