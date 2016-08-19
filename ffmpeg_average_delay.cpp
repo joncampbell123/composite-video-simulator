@@ -57,12 +57,14 @@ int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 #define RGBTRIPLET(r,g,b)       (((uint32_t)(r) << (uint32_t)16) + ((uint32_t)(g) << (uint32_t)8) + ((uint32_t)(b) << (uint32_t)0))
 
 AVFormatContext*	        output_avfmt = NULL;
-AVStream*		            output_avstream_audio = NULL;	// do not free
+AVStream*		            output_avstream_audio = NULL;	            // do not free
 AVCodecContext*		        output_avstream_audio_codec_context = NULL; // do not free
-AVStream*		            output_avstream_video = NULL;	// do not free
+AVStream*		            output_avstream_video = NULL;	            // do not free
 AVCodecContext*		        output_avstream_video_codec_context = NULL; // do not free
-AVFrame*		            output_avstream_video_frame = NULL;         // ARGB
+std::vector<AVFrame*>		output_avstream_video_frame;                // ARGB
 AVFrame*		            output_avstream_video_encode_frame = NULL;  // 4:2:2 or 4:2:0
+size_t                      output_avstream_video_frame_delay = 1;
+size_t                      output_avstream_video_frame_index = 0;
 struct SwsContext*          output_avstream_video_resampler = NULL;
 
 class InputFile {
@@ -614,6 +616,7 @@ static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>               you can specify more than one input file, in order of layering\n");
 	fprintf(stderr," -o <output file>\n");
+    fprintf(stderr," -d <n>                        Video delay buffer (n frames)\n");
     fprintf(stderr," -n <n>                        New content averaging level (256=100% 0=0%)\n");
 }
 
@@ -636,6 +639,15 @@ static int parse_argv(int argc,char **argv) {
                 if (a == NULL) return 1;
                 output_width = (int)strtoul(a,NULL,0);
                 if (output_width < 32) return 1;
+            }
+            else if (!strcmp(a,"d")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                output_avstream_video_frame_delay = (unsigned int)strtoul(a,NULL,0);
+                if (output_avstream_video_frame_delay == 0 || output_avstream_video_frame_delay > 256) {
+                    fprintf(stderr,"Invalid delay\n");
+                    return 1;
+                }
             }
             else if (!strcmp(a,"n")) {
                 a = argv[i++];
@@ -787,6 +799,7 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,unsigned long long field) {
+    unsigned long long efield = field / (unsigned long long)output_avstream_video_frame_delay;
     uint32_t *dscan,*sscan;
     unsigned int r,g,b;
     unsigned int x,y;
@@ -805,17 +818,17 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
         for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
             r  = (((*sscan >> 16UL) & 0xFF) * inputfile.newlevel);
             r += (((*dscan >> 16UL) & 0xFF) * (256 - inputfile.newlevel));
-            r += ((((x^y)+field)&3)*255)/3;
+            r += ((((x^y)+efield)&3)*255)/3;
             r >>= 8;
 
             g  = (((*sscan >>  8UL) & 0xFF) * inputfile.newlevel);
             g += (((*dscan >>  8UL) & 0xFF) * (256 - inputfile.newlevel));
-            g += ((((x^y)+field)&3)*255)/3;
+            g += ((((x^y)+efield)&3)*255)/3;
             g >>= 8;
 
             b  = (((*sscan >>  0UL) & 0xFF) * inputfile.newlevel);
             b += (((*dscan >>  0UL) & 0xFF) * (256 - inputfile.newlevel));
-            b += ((((x^y)+field)&3)*255)/3;
+            b += ((((x^y)+efield)&3)*255)/3;
             b >>= 8;
 
             *dscan = (r << 16) + (g << 8) + b;
@@ -932,17 +945,28 @@ int main(int argc,char **argv) {
 	signal(SIGTERM,sigma);
 
     /* prepare video encoding */
-    output_avstream_video_frame = av_frame_alloc();
-    if (output_avstream_video_frame == NULL) {
-        fprintf(stderr,"Failed to alloc video frame\n");
-        return 1;
-    }
-    output_avstream_video_frame->format = AV_PIX_FMT_BGRA;
-    output_avstream_video_frame->height = output_height;
-    output_avstream_video_frame->width = output_width;
-    if (av_frame_get_buffer(output_avstream_video_frame,64) < 0) {
-        fprintf(stderr,"Failed to alloc render frame\n");
-        return 1;
+    for (size_t i=0;i <= output_avstream_video_frame_delay;i++) {
+        AVFrame *nf;
+
+        nf = av_frame_alloc();
+        if (nf == NULL) {
+            fprintf(stderr,"Failed to alloc video frame\n");
+            return 1;
+        }
+        nf->format = AV_PIX_FMT_BGRA;
+        nf->height = output_height;
+        nf->width = output_width;
+        if (av_frame_get_buffer(nf,64) < 0) {
+            fprintf(stderr,"Failed to alloc render frame\n");
+            return 1;
+        }
+
+        // zero the frame ONCE.
+        // what we want is, if a threshhold is given for the first input file,
+        // that it means the user wants us to cause a "hall of mirrors" effect where keying happens.
+        memset(nf->data[0],0,nf->linesize[0]*nf->height);
+
+        output_avstream_video_frame.push_back(nf);
     }
 
     {
@@ -965,9 +989,9 @@ int main(int argc,char **argv) {
     if (output_avstream_video_resampler == NULL) {
         output_avstream_video_resampler = sws_getContext(
                 // source
-                output_avstream_video_frame->width,
-                output_avstream_video_frame->height,
-                (AVPixelFormat)output_avstream_video_frame->format,
+                output_avstream_video_frame[0]->width,
+                output_avstream_video_frame[0]->height,
+                (AVPixelFormat)output_avstream_video_frame[0]->format,
                 // dest
                 output_avstream_video_encode_frame->width,
                 output_avstream_video_encode_frame->height,
@@ -1069,25 +1093,29 @@ int main(int argc,char **argv) {
                     }
 
                     // composite the layer, keying against the color. all code assumes ARGB
-                    composite_layer(output_avstream_video_frame,(*i).input_avstream_video_frame_rgb,*i,current);
+                    composite_layer(output_avstream_video_frame[output_avstream_video_frame_index],(*i).input_avstream_video_frame_rgb,*i,current);
                 }
 
                 // convert ARGB to whatever the codec demands, and encode
-                output_avstream_video_encode_frame->pts = output_avstream_video_frame->pts;
-                output_avstream_video_encode_frame->pkt_pts = output_avstream_video_frame->pkt_pts;
-                output_avstream_video_encode_frame->pkt_dts = output_avstream_video_frame->pkt_dts;
-                output_avstream_video_encode_frame->top_field_first = output_avstream_video_frame->top_field_first;
-                output_avstream_video_encode_frame->interlaced_frame = output_avstream_video_frame->interlaced_frame;
+                output_avstream_video_encode_frame->pts = output_avstream_video_frame[output_avstream_video_frame_index]->pts;
+                output_avstream_video_encode_frame->pkt_pts = output_avstream_video_frame[output_avstream_video_frame_index]->pkt_pts;
+                output_avstream_video_encode_frame->pkt_dts = output_avstream_video_frame[output_avstream_video_frame_index]->pkt_dts;
+                output_avstream_video_encode_frame->top_field_first = output_avstream_video_frame[output_avstream_video_frame_index]->top_field_first;
+                output_avstream_video_encode_frame->interlaced_frame = output_avstream_video_frame[output_avstream_video_frame_index]->interlaced_frame;
 
                 if (sws_scale(output_avstream_video_resampler,
                             // source
-                            output_avstream_video_frame->data,
-                            output_avstream_video_frame->linesize,
-                            0,output_avstream_video_frame->height,
+                            output_avstream_video_frame[output_avstream_video_frame_index]->data,
+                            output_avstream_video_frame[output_avstream_video_frame_index]->linesize,
+                            0,output_avstream_video_frame[output_avstream_video_frame_index]->height,
                             // dest
                             output_avstream_video_encode_frame->data,
                             output_avstream_video_encode_frame->linesize) <= 0)
                     fprintf(stderr,"WARNING: sws_scale failed\n");
+
+                assert(output_avstream_video_frame_index < output_avstream_video_frame.size());
+                if ((++output_avstream_video_frame_index) >= output_avstream_video_frame_delay)
+                    output_avstream_video_frame_index = 0;
 
                 output_frame(output_avstream_video_encode_frame,current);
                 current++;
@@ -1124,8 +1152,11 @@ int main(int argc,char **argv) {
     }
     if (output_avstream_video_encode_frame != NULL)
 		av_frame_free(&output_avstream_video_encode_frame);
-	if (output_avstream_video_frame != NULL)
-		av_frame_free(&output_avstream_video_frame);
+    while (!output_avstream_video_frame.empty()) {
+        AVFrame *nf = output_avstream_video_frame.back();
+        output_avstream_video_frame.pop_back();
+        if (nf != NULL) av_frame_free(&nf);
+    }
 	av_write_trailer(output_avfmt);
 	if (output_avfmt != NULL && !(output_avfmt->oformat->flags & AVFMT_NOFILE))
 		avio_closep(&output_avfmt->pb);
