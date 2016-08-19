@@ -62,7 +62,7 @@ struct SwsContext*          output_avstream_video_resampler = NULL;
 
 class InputFile {
 public:
-    InputFile() : threshhold(0), invert(false), noisekey(0), color(RGBTRIPLET(0,0,0)/*BLACK*/) {
+    InputFile() : threshhold(0), invert(false), noisekey(0), color(RGBTRIPLET(0,0,0)/*BLACK*/), xdivr(1) {
         noisekey = 0;
         input_avfmt = NULL;
         audio_dst_data = NULL;
@@ -514,6 +514,7 @@ public:
     std::string             path;
     uint32_t                color;
     int                     threshhold;
+    unsigned int            xdivr;
     bool                    invert;
     bool                    eof;
     bool                    eof_stream;
@@ -617,6 +618,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -inv <n>                      If set, invert key\n");
     fprintf(stderr," -noise <n>                    If set, keyed out sections still pass through by random\n");
     fprintf(stderr," -width <w>                    Width in pixels\n");
+    fprintf(stderr," -xd <x>                       Check color key every X pixels (i.e. older equipment)\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -632,6 +634,11 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+            }
+            else if (!strcmp(a,"xd")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                current_input_file().xdivr = (unsigned int)strtoul(a,NULL,0);
             }
             else if (!strcmp(a,"width")) {
                 a = argv[i++];
@@ -805,7 +812,7 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
     uint32_t *dscan,*sscan;
-    unsigned int x,y;
+    unsigned int x,y,xdivc;
     int dR,dG,dB,d;
 
     if (dstframe == NULL || srcframe == NULL) return;
@@ -818,15 +825,18 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
     for (y=0;y < dstframe->height;y++) {
         sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
         dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
+        xdivc = 0;
         for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
             // if the source pixel is within the key threshhold, then do not copy the pixel.
             // else, copy the pixel.
             // very crude color keying, by design. it looks very "retro".
             // run the source file through the composite video simulator first and it will look like 1980's green-screen compositing.
-            dR = (*sscan >> 16UL) & 0xFF; dR -= (inputfile.color >> 16UL) & 0xFF;
-            dG = (*sscan >>  8UL) & 0xFF; dG -= (inputfile.color >>  8UL) & 0xFF;
-            dB = (*sscan >>  0UL) & 0xFF; dB -= (inputfile.color >>  0UL) & 0xFF;
-            d = abs(dR) + abs(dG) + abs(dB);
+            if (xdivc == 0) {
+                dR = (*sscan >> 16UL) & 0xFF; dR -= (inputfile.color >> 16UL) & 0xFF;
+                dG = (*sscan >>  8UL) & 0xFF; dG -= (inputfile.color >>  8UL) & 0xFF;
+                dB = (*sscan >>  0UL) & 0xFF; dB -= (inputfile.color >>  0UL) & 0xFF;
+                d = abs(dR) + abs(dG) + abs(dB);
+            }
 
             if (inputfile.noisekey > 0) {
                 unsigned int x = (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand();
@@ -840,6 +850,8 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
             else {
                 if (d >= inputfile.threshhold) *dscan = *sscan;
             }
+
+            if ((++xdivc) >= inputfile.xdivr) xdivc = 0;
         }
     }
 }
