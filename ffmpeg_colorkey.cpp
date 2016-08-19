@@ -64,7 +64,7 @@ struct SwsContext*          output_avstream_video_resampler = NULL;
 
 class InputFile {
 public:
-    InputFile() : threshhold(0), invert(false), noisekey(0), color(RGBTRIPLET(0,0,0)/*BLACK*/), xdivr(1) {
+    InputFile() : threshhold(0), invert(false), noisekey(0), color(RGBTRIPLET(0,0,0)/*BLACK*/), xdivr(1), fade(0) {
         noisekey = 0;
         input_avfmt = NULL;
         audio_dst_data = NULL;
@@ -516,6 +516,7 @@ public:
     std::string             path;
     uint32_t                color;
     int                     threshhold;
+    unsigned int            fade;
     unsigned int            xdivr;
     bool                    invert;
     bool                    eof;
@@ -622,6 +623,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -width <w>                    Width in pixels\n");
     fprintf(stderr," -xd <x>                       Check color key every X pixels (i.e. older equipment)\n");
     fprintf(stderr," -d <n>                        Video delay buffer (n frames)\n");
+    fprintf(stderr," -f <n>                        Fade buffer contents (n=0...256)\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -637,6 +639,11 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+            }
+            else if (!strcmp(a,"f")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                current_input_file().fade = (unsigned int)strtoul(a,NULL,0);
             }
             else if (!strcmp(a,"d")) {
                 a = argv[i++];
@@ -854,6 +861,16 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
                 unsigned int x = (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand();
                 x %= 20001;
                 if (x < inputfile.noisekey) d = 0xFFFF;
+            }
+
+            if (inputfile.fade != 0) {
+                unsigned int r,g,b;
+
+                r = (((*dscan >> 16UL) & 0xFF) * (256 - inputfile.fade)) >> 8;
+                g = (((*dscan >>  8UL) & 0xFF) * (256 - inputfile.fade)) >> 8;
+                b = (((*dscan >>  0UL) & 0xFF) * (256 - inputfile.fade)) >> 8;
+
+                *dscan = (r << 16) + (g << 8) + b;
             }
 
             if (inputfile.invert) {
