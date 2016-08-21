@@ -57,6 +57,8 @@ sub makewide($) {
 
     elsif ($a eq '.') { return '｡'; }
 
+    elsif ($a eq ' ') { return '　'; }
+
     $ac = ord($a);
     if ($ac >= ord('A') && $ac <= ord('Z')) { return chr($ac + ord('Ａ') - ord('A')); }
     if ($ac >= ord('a') && $ac <= ord('z')) { return chr($ac + ord('ａ') - ord('a')); }
