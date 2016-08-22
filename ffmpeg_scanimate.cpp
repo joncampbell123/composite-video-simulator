@@ -49,6 +49,7 @@ bool            use_422_colorspace = false; // I would default this to true but 
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
 int		output_height = 480;
+bool        input_ntsc = false;
 bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
@@ -185,8 +186,14 @@ public:
                 return 1;
             }
             input_avstream_video_frame_rgb->format = AV_PIX_FMT_BGRA;
-            input_avstream_video_frame_rgb->height = output_height;
-            input_avstream_video_frame_rgb->width = output_width;
+            if (input_ntsc) {
+                input_avstream_video_frame_rgb->height = output_pal ? 576 : 480;
+                input_avstream_video_frame_rgb->width = 480;
+            }
+            else {
+                input_avstream_video_frame_rgb->height = 800;
+                input_avstream_video_frame_rgb->width = 600;
+            }
             if (av_frame_get_buffer(input_avstream_video_frame_rgb,64) < 0) {
                 fprintf(stderr,"Failed to alloc render frame\n");
                 close_input();
@@ -651,6 +658,9 @@ static int parse_argv(int argc,char **argv) {
             else if (!strcmp(a,"420")) {
                 use_422_colorspace = false;
             }
+            else if (!strcmp(a,"inntsc")) {
+                input_ntsc = true;
+            }
 			else if (!strcmp(a,"tvstd")) {
 				a = argv[i++];
 
@@ -859,8 +869,10 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     uint32_t *rasteremu; // high precision grayscale
     double sx,sy,tx,ty;
     unsigned int dx,dy;
+    unsigned int ystep;
     double dot_radius;
     unsigned int x,y;
+    double sigscalxy;
     double frame_t;
     uint32_t rgba;
     double signal;
@@ -870,27 +882,47 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     if (dstframe->data[0] == NULL || srcframe->data[0] == 0) return;
     if (dstframe->linesize[0] < (dstframe->width*4)) return; // ARGB
     if (srcframe->linesize[0] < (srcframe->width*4)) return; // ARGB
-    if (dstframe->width != srcframe->width) return;
-    if (dstframe->height != srcframe->height) return;
 
     rasteremu = new uint32_t[dstframe->width * dstframe->height];
     memset(rasteremu,0,sizeof(uint32_t)*dstframe->width*dstframe->height);
 
+    if (input_ntsc) {
+        // source is NTSC
+        ystep = 2;
+        y = field;
+    }
+    else {
+        // source is "monochrome camera with about 800 lines"
+        ystep = 1;
+        y = 0;
+    }
+
     // sx and sy are source raster position
     // tx and ty are where the raster actually ends up
-    for (y=field;y < dstframe->height;y += 2) {
-        for (x=0;x < (dstframe->width<<PRECISION);x++) {
-            sx = (((double)x * 2) / (dstframe->width<<PRECISION)) - 1.0;
-            sy = (((double)y * 2) / dstframe->height) - 1.0;
-            dot_radius = 2.05;
+    sigscalxy = ((double)dstframe->width / srcframe->width) * ((double)dstframe->height / srcframe->height) * 0.9;
+    for (;y < srcframe->height;y += ystep) {
+        for (x=0;x < (srcframe->width<<PRECISION);x++) {
+            sx = (((double)x * 2) / (srcframe->width<<PRECISION)) - 1.0;
+            sy = (((double)y * 2) / srcframe->height) - 1.0;
+
+            if (input_ntsc) {
+                // ntsc
+                dot_radius = ((double)dstframe->height * 2.05) / srcframe->height;
+            }
+            else {
+                // monochrome camera
+                dot_radius = ((double)dstframe->height * 1.05) / srcframe->height;
+            }
 
             rgba = ((uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y)))[x>>PRECISION];
             signal = ((double)((rgba >> 8U) & 0xFF)) / 255; // use green part
 
-            frame_t = ((double)((y * dstframe->width * (1<<PRECISION)) + x)) / (dstframe->width * dstframe->height * (1<<PRECISION));
+            frame_t = ((double)((y * srcframe->width * (1<<PRECISION)) + x)) / (srcframe->width * srcframe->height * (1<<PRECISION));
 
             // process
             scanimate_modify_raster(sx,sy,dot_radius,signal,field,fieldno,frame_t);
+            if (dot_radius < 1.2) dot_radius = 1.2;
+            signal *= sigscalxy;
 
             // final
             phosphor_dot(rasteremu,dstframe,sx,sy,signal,dot_radius);
