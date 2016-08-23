@@ -844,21 +844,24 @@ void scanimate_modify_raster(double &sx,double &sy,double &dot_radius,double &si
 
     switch (effect) {
         case 3: // sin wave "diffuse"
-            ef_t = sin((double)ef_field / (59.94 * 1));
-            sx += sin(frame_t * M_PI * 2 * 6) * ef_t;
-            sy += cos(frame_t * M_PI * 2 * 6) * ef_t;
+            ef_t = sin(((double)ef_field * M_PI * 2) / (59.94 * 1));
+            sx += sin(frame_t * M_PI * 2 * 6) * ef_t * 0.1;
+            sy += cos(frame_t * M_PI * 2 * 6) * ef_t * 0.1;
             break;
         case 1: // vertical "rotate"
             ef_t = (double)ef_field / (60 * 3);
             sy *= (1.0 - (ef_t * 2.0));
+            signal *= fabs(1.0 - (ef_t * 2.0));
             break;
         case 2: // vertical stretch out
             ef_t = (double)ef_field / (60 * 3);
-            sy *= (1.0 + (ef_t * 2.5));
+            sy *= (1.0 + (ef_t * 12));
+            signal *= std::min(fabs(1.0 + (ef_t * 12)),8.0);
             break;
         case 0: // trapezoid effect
             ef_t = (double)ef_field / (60 * 3);
             sx *= ((((sy + 1.0) / 2.0) * (1.0 - ef_t)) + ef_t);
+            signal *= ((((sy + 1.0) / 2.0) * (1.0 - ef_t)) + ef_t);
             break;
     }
     // end modify here
@@ -913,6 +916,9 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
                 // monochrome camera
                 dot_radius = ((double)dstframe->height * 1.05) / srcframe->height;
             }
+
+            // slight "slant" because of CRT raster
+            sy += (((double)x * ystep) / (srcframe->width<<PRECISION)) / srcframe->height;
 
             rgba = ((uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y)))[x>>PRECISION];
             signal = ((double)((rgba >> 8U) & 0xFF)) / 255; // use green part
