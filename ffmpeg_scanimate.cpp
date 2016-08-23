@@ -616,6 +616,24 @@ void preset_NTSC() {
 	output_ntsc = true;
 }
 
+void preset_720p60() {
+	output_field_rate.num = 60000;
+	output_field_rate.den = 1001;
+	output_height = 720;
+	output_width = 1280;
+	output_pal = false;
+	output_ntsc = true;
+}
+
+void preset_1080p60() {
+	output_field_rate.num = 60000;
+	output_field_rate.den = 1001;
+	output_height = 1080;
+	output_width = 1920;
+	output_pal = false;
+	output_ntsc = true;
+}
+
 static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>               you can specify more than one input file, in order of layering\n");
@@ -670,7 +688,13 @@ static int parse_argv(int argc,char **argv) {
 				else if (!strcmp(a,"ntsc")) {
 					preset_NTSC();
 				}
-				else {
+                else if (!strcmp(a,"720p60")) {
+                    preset_720p60();
+                }
+                else if (!strcmp(a,"1080p60")) {
+                    preset_1080p60();
+                }
+                else {
 					fprintf(stderr,"Unknown tv std '%s'\n",a);
 					return 1;
 				}
