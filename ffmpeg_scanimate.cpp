@@ -856,7 +856,6 @@ void scanimate_modify_raster(double &sx,double &sy,double &dot_radius,double &si
         case 2: // vertical stretch out
             ef_t = (double)ef_field / (60 * 3);
             sy *= (1.0 + (ef_t * 12));
-            signal *= std::min(fabs(1.0 + (ef_t * 12)),8.0);
             break;
         case 0: // trapezoid effect
             ef_t = (double)ef_field / (60 * 3);
