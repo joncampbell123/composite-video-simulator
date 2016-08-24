@@ -971,7 +971,7 @@ void YIQ_to_RGB(int &r,int &g,int &b,int Y,int I,int Q) {
 }
 
 // This code assumes ARGB and the frame match resolution/
-void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,unsigned long long fieldno) {
+void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,unsigned int field,unsigned long long fieldno) {
     uint32_t *dscan,*sscan;
     unsigned int x,y;
     unsigned int shr;
@@ -989,7 +989,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     fI = new int[dstframe->width * dstframe->height];
     fQ = new int[dstframe->width * dstframe->height];
 
-    for (y=0;y < dstframe->height;y++) {
+    for (y=field;y < dstframe->height;y += 2) {
         sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
         for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
             r  = (*sscan >> 16UL) & 0xFF;
@@ -999,32 +999,32 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
         }
     }
 
-	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
-		for (unsigned int p=1;p <= 2;p++) {
-			for (y=0;y < dstframe->height;y++) {
+    { /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
+        for (unsigned int p=1;p <= 2;p++) {
+            for (y=field;y < dstframe->height;y += 2) {
                 int *P = ((p == 1) ? fI : fQ) + (dstframe->width * y);
-				LowpassFilter lp[3];
-				double cutoff;
-				int delay;
-				double s;
+                LowpassFilter lp[3];
+                double cutoff;
+                int delay;
+                double s;
 
                 // NTSC YIQ bandwidth: I=1.3MHz Q=0.6MHz
                 cutoff = (p == 1) ? 1300000 : 600000;
                 delay = (p == 1) ? 2 : 4;
 
-				for (unsigned int f=0;f < 3;f++) {
-					lp[f].setFilter((315000000.00 * 4) / 88,cutoff); // 315/88 Mhz rate * 4
-					lp[f].resetFilter(0);
-				}
+                for (unsigned int f=0;f < 3;f++) {
+                    lp[f].setFilter((315000000.00 * 4) / 88,cutoff); // 315/88 Mhz rate * 4
+                    lp[f].resetFilter(0);
+                }
 
-				for (x=0;x < dstframe->width;x++) {
-					s = P[x];
-					for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
-					if (x >= delay) P[x-delay] = s;
-				}
-			}
-		}
-	}
+                for (x=0;x < dstframe->width;x++) {
+                    s = P[x];
+                    for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+                    if (x >= delay) P[x-delay] = s;
+                }
+            }
+        }
+    }
 
     const int subcarrier_amplitude = 100;
 
@@ -1032,7 +1032,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     {
         unsigned int x,y;
 
-        for (y=0;y < dstframe->height;y++) {
+        for (y=field;y < dstframe->height;y += 2) {
             static const int8_t Umult[4] = { 1, 0,-1, 0 };
             static const int8_t Vmult[4] = { 0, 1, 0,-1 };
             int *Y = fY + (y * dstframe->width);
@@ -1063,7 +1063,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
         int chroma[dstframe->width]; // WARNING: This is more GCC-specific C++ than normal
         unsigned int x,y;
 
-        for (y=0;y < dstframe->height;y++) {
+        for (y=field;y < dstframe->height;y += 2) {
             int *Y = fY + (y * dstframe->width);
             int *I = fI + (y * dstframe->width);
             int *Q = fQ + (y * dstframe->width);
@@ -1112,7 +1112,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
         }
     }
 
-    for (y=0;y < dstframe->height;y++) {
+    for (y=field;y < dstframe->height;y += 2) {
         dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
         for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
             YIQ_to_RGB(r,g,b,fY[(y*dstframe->width)+x],fI[(y*dstframe->width)+x],fQ[(y*dstframe->width)+x]);
@@ -1382,7 +1382,34 @@ int main(int argc,char **argv) {
                     }
 
                     // composite the layer, keying against the color. all code assumes ARGB
-                    composite_layer(output_avstream_video_frame[output_avstream_video_frame_index],(*i).input_avstream_video_frame_rgb,*i,current);
+                    composite_layer(output_avstream_video_frame[output_avstream_video_frame_index],(*i).input_avstream_video_frame_rgb,*i,(current & 1) ^ 1,current);
+                }
+
+                // field deinterlace
+                {
+                    unsigned int field = (current & 1) ^ 1;
+                    unsigned int sy,dy,y;
+
+                    if (field) {
+                        for (y=field;y < output_avstream_video_frame[output_avstream_video_frame_index]->height;y += 2) {
+                            uint32_t *d = (uint32_t*)(output_avstream_video_frame[output_avstream_video_frame_index]->data[0] +
+                                    (output_avstream_video_frame[output_avstream_video_frame_index]->linesize[0] * (y-1)));
+                            uint32_t *s = (uint32_t*)(output_avstream_video_frame[output_avstream_video_frame_index]->data[0] +
+                                    (output_avstream_video_frame[output_avstream_video_frame_index]->linesize[0] * y));
+
+                            memcpy(d,s,sizeof(uint32_t)*output_avstream_video_frame[output_avstream_video_frame_index]->width);
+                        }
+                    }
+                    else { // field == 0
+                        for (y=1;y < output_avstream_video_frame[output_avstream_video_frame_index]->height;y += 2) {
+                            uint32_t *d = (uint32_t*)(output_avstream_video_frame[output_avstream_video_frame_index]->data[0] +
+                                    (output_avstream_video_frame[output_avstream_video_frame_index]->linesize[0] * y));
+                            uint32_t *s = (uint32_t*)(output_avstream_video_frame[output_avstream_video_frame_index]->data[0] +
+                                    (output_avstream_video_frame[output_avstream_video_frame_index]->linesize[0] * (y+1)));
+
+                            memcpy(d,s,sizeof(uint32_t)*output_avstream_video_frame[output_avstream_video_frame_index]->width);
+                        }
+                    }
                 }
 
                 // convert ARGB to whatever the codec demands, and encode
