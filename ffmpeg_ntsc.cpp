@@ -971,8 +971,7 @@ void YIQ_to_RGB(int &r,int &g,int &b,int Y,int I,int Q) {
 }
 
 // This code assumes ARGB and the frame match resolution/
-void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,unsigned long long field) {
-    unsigned long long efield = field / (unsigned long long)output_avstream_video_frame_delay;
+void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,unsigned long long fieldno) {
     uint32_t *dscan,*sscan;
     unsigned int x,y;
     unsigned int shr;
@@ -1026,6 +1025,92 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 			}
 		}
 	}
+
+    const int subcarrier_amplitude = 100;
+
+    /* render chroma into luma, fake subcarrier */
+    {
+        unsigned int x,y;
+
+        for (y=0;y < dstframe->height;y++) {
+            static const int8_t Umult[4] = { 1, 0,-1, 0 };
+            static const int8_t Vmult[4] = { 0, 1, 0,-1 };
+            int *Y = fY + (y * dstframe->width);
+            int *I = fI + (y * dstframe->width);
+            int *Q = fQ + (y * dstframe->width);
+            unsigned int xc = dstframe->width;
+            unsigned int xi;
+
+            xi = (fieldno + (y >> 1)) & 3;
+
+            /* remember: this code assumes 4:2:2 */
+            /* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
+            for (x=0;x < xc;x++) {
+                unsigned int sxi = xi+x;
+                int chroma;
+
+                chroma  = (int)I[x] * subcarrier_amplitude * Umult[sxi&3];
+                chroma += (int)Q[x] * subcarrier_amplitude * Vmult[sxi&3];
+                Y[x] += (chroma / 50);
+                I[x] = 0;
+                Q[x] = 0;
+            }
+        }
+    }
+
+    /* decode color from luma */
+    {
+        int chroma[dstframe->width]; // WARNING: This is more GCC-specific C++ than normal
+        unsigned int x,y;
+
+        for (y=0;y < dstframe->height;y++) {
+            int *Y = fY + (y * dstframe->width);
+            int *I = fI + (y * dstframe->width);
+            int *Q = fQ + (y * dstframe->width);
+            int delay[4] = {0,0,0,0};
+            int sum = 0;
+            int c;
+
+            // precharge by 2 pixels to center box blur
+            delay[2] = Y[0]; sum += delay[2];
+            delay[3] = Y[1]; sum += delay[3];
+            for (x=0;x < dstframe->width;x++) {
+                c = Y[x+2];
+                sum -= delay[0];
+                for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
+                delay[3] = c;
+                sum += delay[3];
+                Y[x] = sum / 4;
+                chroma[x] = c - Y[x];
+            }
+
+            {
+                unsigned int xi = 0;
+
+                // NTSC 2 color frames long
+                xi = (fieldno + (y >> 1)) & 3;
+
+                for (x=((4-xi)&3);x < dstframe->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
+                    chroma[x+2] = -chroma[x+2];
+                    chroma[x+3] = -chroma[x+3];
+                }
+
+                for (x=0;x < dstframe->width;x++) {
+                    chroma[x] = ((int)chroma[x] * 50) / subcarrier_amplitude;
+                }
+
+                /* decode the color right back out from the subcarrier we generated */
+                for (x=0;(x+xi+1) < dstframe->width;x += 2) {
+                    I[x] = -chroma[x+xi+0];
+                    Q[x] = -chroma[x+xi+1];
+                }
+                for (x=0;(x+2) < dstframe->width;x += 2) {
+                    I[x+1] = (I[x] + I[x+2]) >> 1;
+                    Q[x+1] = (Q[x] + Q[x+2]) >> 1;
+                }
+            }
+        }
+    }
 
     for (y=0;y < dstframe->height;y++) {
         dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
