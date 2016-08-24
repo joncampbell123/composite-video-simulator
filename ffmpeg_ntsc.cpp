@@ -45,6 +45,162 @@ using namespace std;
 #include <vector>
 #include <stdexcept>
 
+/* return a floating point value specifying what to scale the sample
+ * value by to reduce it from full volume to dB decibels */
+double dBFS(double dB)
+{
+	/* 10 ^ (dB / 20),
+	   based on reversing the formula for converting samples to decibels:
+	   dB = 20.0 * log10(sample);
+	   where "sample" is -1.0 <= x <= 1.0 */
+	return pow(10.0,dB / 20.0);
+}
+
+/* attenuate a sample value by this many dBFS */
+/* so if you want to reduce it by 20dBFS you pass -20 as dB */
+double attenuate_dBFS(double sample,double dB)
+{
+	return sample * dBFS(dB);
+}
+
+/* opposite: convert sample to decibels */
+double dBFS_measure(double sample) {
+	return 20.0 * log10(sample);
+}
+
+// lowpass filter
+// you can make it a highpass filter by applying a lowpass then subtracting from source.
+class LowpassFilter {
+public:
+	LowpassFilter() : timeInterval(0), cutoff(0), alpha(0), prev(0), tau(0) {
+	}
+	void setFilter(const double rate/*sample rate of audio*/,const double hz/*cutoff*/) {
+#ifndef M_PI
+#error your math.h does not include M_PI constant
+#endif
+		timeInterval = 1.0 / rate;
+		tau = 1 / (hz * 2 * M_PI);
+		cutoff = hz;
+		alpha = timeInterval / (tau + timeInterval);
+	}
+	void resetFilter(const double val=0) {
+		prev = val;
+	}
+	double lowpass(const double sample) {
+		const double stage1 = sample * alpha;
+		const double stage2 = prev - (prev * alpha); /* NTS: Instead of prev * (1.0 - alpha) */
+		return (prev = (stage1 + stage2)); /* prev = stage1+stage2 then return prev */
+	}
+	double highpass(const double sample) {
+		const double stage1 = sample * alpha;
+		const double stage2 = prev - (prev * alpha); /* NTS: Instead of prev * (1.0 - alpha) */
+		return sample - (prev = (stage1 + stage2)); /* prev = stage1+stage2 then return (sample - prev) */
+	}
+public:
+	double			timeInterval;
+	double			cutoff;
+	double			alpha; /* timeInterval / (tau + timeInterval) */
+	double			prev;
+	double			tau;
+};
+
+class HiLoPair {
+public:
+	LowpassFilter		hi,lo;	// highpass, lowpass
+public:
+	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
+		lo.setFilter(rate,low_hz);
+		hi.setFilter(rate,high_hz);
+	}
+	double filter(const double sample) {
+		return hi.highpass(lo.lowpass(sample)); /* first lowpass, then highpass */
+	}
+};
+
+class HiLoPass : public vector<HiLoPair> { // all passes, one sample of one channel
+public:
+	HiLoPass() : vector() { }
+public:
+	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
+		for (size_t i=0;i < size();i++) (*this)[i].setFilter(rate,low_hz,high_hz);
+	}
+	double filter(double sample) {
+		for (size_t i=0;i < size();i++) sample = (*this)[i].lo.lowpass(sample);
+		for (size_t i=0;i < size();i++) sample = (*this)[i].hi.highpass(sample);
+		return sample;
+	}
+	void init(const unsigned int passes) {
+		clear();
+		resize(passes);
+		assert(size() >= passes);
+	}
+};
+
+class HiLoSample : public vector<HiLoPass> { // all passes, all channels of one sample period
+public:
+	HiLoSample() : vector() { }
+public:
+	void init(const unsigned int channels,const unsigned int passes) {
+		clear();
+		resize(channels);
+		assert(size() >= channels);
+		for (size_t i=0;i < size();i++) (*this)[i].init(passes);
+	}
+	void setFilter(const double rate/*sample rate of audio*/,const double low_hz,const double high_hz) {
+		for (size_t i=0;i < size();i++) (*this)[i].setFilter(rate,low_hz,high_hz);
+	}
+};
+
+class HiLoComboPass {
+public:
+	HiLoComboPass() : passes(0), channels(0), rate(0), low_cutoff(0), high_cutoff(0) {
+	}
+	~HiLoComboPass() {
+		clear();
+	}
+	void setChannels(const size_t _channels) {
+		if (channels != _channels) {
+			clear();
+			channels = _channels;
+		}
+	}
+	void setCutoff(const double _low_cutoff,const double _high_cutoff) {
+		if (low_cutoff != _low_cutoff || high_cutoff != _high_cutoff) {
+			clear();
+			low_cutoff = _low_cutoff;
+			high_cutoff = _high_cutoff;
+		}
+	}
+	void setRate(const double _rate) {
+		if (rate != _rate) {
+			clear();
+			rate = _rate;
+		}
+	}
+	void setPasses(const size_t _passes) {
+		if (passes != _passes) {
+			clear();
+			passes = _passes;
+		}
+	}
+	void clear() {
+		audiostate.clear();
+	}
+	void init() {
+		clear();
+		if (channels == 0 || passes == 0 || rate == 0 || low_cutoff == 0 || high_cutoff == 0) return;
+		audiostate.init(channels,passes);
+		audiostate.setFilter(rate,low_cutoff,high_cutoff);
+	}
+public:
+	double		rate;
+	size_t		passes;
+	size_t		channels;
+	double		low_cutoff;
+	double		high_cutoff;
+	HiLoSample	audiostate;
+};
+
 bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
@@ -843,6 +999,33 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
             RGB_to_YIQ(fY[(y*dstframe->width)+x],fI[(y*dstframe->width)+x],fQ[(y*dstframe->width)+x],r,g,b);
         }
     }
+
+	{ /* lowpass the chroma more. composite video does not allocate as much bandwidth to color as luma. */
+		for (unsigned int p=1;p <= 2;p++) {
+			for (y=0;y < dstframe->height;y++) {
+                int *P = ((p == 1) ? fI : fQ) + (dstframe->width * y);
+				LowpassFilter lp[3];
+				double cutoff;
+				int delay;
+				double s;
+
+                // NTSC YIQ bandwidth: I=1.3MHz Q=0.6MHz
+                cutoff = (p == 1) ? 1300000 : 600000;
+                delay = (p == 1) ? 2 : 4;
+
+				for (unsigned int f=0;f < 3;f++) {
+					lp[f].setFilter((315000000.00 * 4) / 88,cutoff); // 315/88 Mhz rate * 4
+					lp[f].resetFilter(0);
+				}
+
+				for (x=0;x < dstframe->width;x++) {
+					s = P[x];
+					for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+					if (x >= delay) P[x-delay] = s;
+				}
+			}
+		}
+	}
 
     for (y=0;y < dstframe->height;y++) {
         dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
