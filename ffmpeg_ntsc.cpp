@@ -1704,6 +1704,167 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 		}
 	}
 
+	// NTS: At this point, the video best resembles what you'd get from a typical DVD player's composite video output.
+	//      Slightly blurry, some color artifacts, and edges will have that "buzz" effect, but still a good picture.
+
+	if (emulating_vhs) {
+		double luma_cut,chroma_cut;
+		int chroma_delay;
+
+		switch (output_vhs_tape_speed) {
+			case VHS_SP:
+				luma_cut = 2400000; // 3.0MHz x 80%
+				chroma_cut = 320000; // 400KHz x 80%
+				chroma_delay = 4;
+				break;
+			case VHS_LP:
+				luma_cut = 1900000; // ..
+				chroma_cut = 300000; // 375KHz x 80%
+				chroma_delay = 5;
+				break;
+			case VHS_EP:
+				luma_cut = 1400000; // ..
+				chroma_cut = 280000; // 350KHz x 80%
+				chroma_delay = 6;
+				break;
+			default:
+				abort();
+		};
+
+		// luma lowpass
+		for (y=field;y < dstframe->height;y += 2) {
+			int *Y = fY + (y * dstframe->width);
+			LowpassFilter lp[3];
+			LowpassFilter pre;
+			double s;
+
+			for (unsigned int f=0;f < 3;f++) {
+				lp[f].setFilter((315000000.00 * 4) / 88,luma_cut); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
+				lp[f].resetFilter(16);
+			}
+			pre.setFilter((315000000.00 * 4) / 88,luma_cut); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			pre.resetFilter(16);
+			for (x=0;x < dstframe->width;x++) {
+				s = Y[x];
+				for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+				s += pre.highpass(s) * 1.6;
+				Y[x] = s;
+			}
+		}
+
+		// chroma lowpass
+		for (y=field;y < dstframe->height;y += 2) {
+			int *U = fI + (y * dstframe->width);
+			int *V = fQ + (y * dstframe->width);
+			LowpassFilter lpU[3],lpV[3];
+			double s;
+
+			for (unsigned int f=0;f < 3;f++) {
+				lpU[f].setFilter((315000000.00 * 4) / 88,chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+				lpU[f].resetFilter(0);
+				lpV[f].setFilter((315000000.00 * 4) / 88,chroma_cut); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+				lpV[f].resetFilter(0);
+			}
+			for (x=0;x < dstframe->width;x++) {
+				s = U[x];
+				for (unsigned int f=0;f < 3;f++) s = lpU[f].lowpass(s);
+				if (x >= chroma_delay) U[x-chroma_delay] = s;
+
+				s = V[x];
+				for (unsigned int f=0;f < 3;f++) s = lpV[f].lowpass(s);
+				if (x >= chroma_delay) V[x-chroma_delay] = s;
+			}
+		}
+
+		// VHS decks also vertically smear the chroma subcarrier using a delay line
+		// to add the previous line's color subcarrier to the current line's color subcarrier.
+		// note that phase changes in NTSC are compensated for by the VHS deck to make the
+		// phase line up per scanline (else summing the previous line's carrier would
+		// cancel it out).
+		if (vhs_chroma_vert_blend && output_ntsc) {
+			int delayU[dstframe->width];
+			int delayV[dstframe->width];
+
+			memset(delayU,0,dstframe->width*sizeof(int));
+			memset(delayV,0,dstframe->width*sizeof(int));
+			for (y=(field+2);y < dstframe->height;y += 2) {
+				int *U = fI + (y * dstframe->width);
+				int *V = fQ + (y * dstframe->width);
+				int cU,cV;
+
+				for (x=0;x < dstframe->width;x++) {
+					cU = U[x];
+					cV = V[x];
+					U[x] = (delayU[x]+cU+1)>>1;
+					V[x] = (delayV[x]+cV+1)>>1;
+					delayU[x] = cU;
+					delayV[x] = cV;
+				}
+			}
+		}
+
+		// VHS decks tend to sharpen the picture on playback
+		if (true/*TODO make option*/) {
+			// luma
+			for (y=field;y < dstframe->height;y += 2) {
+				int *Y = fY + (y * dstframe->width);
+				LowpassFilter lp[3];
+				double s,ts;
+
+				for (unsigned int f=0;f < 3;f++) {
+					lp[f].setFilter((315000000.00 * 4) / 88,luma_cut*2); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
+					lp[f].resetFilter(0);
+				}
+				for (x=0;x < dstframe->width;x++) {
+					s = ts = Y[x];
+					for (unsigned int f=0;f < 3;f++) ts = lp[f].lowpass(ts);
+					Y[x] = s + ((s - ts) * vhs_out_sharpen);
+				}
+			}
+
+			// chroma
+			for (y=field;y < dstframe->height;y += 2) {
+				int *U = fI + (y * dstframe->width);
+				int *V = fQ + (y * dstframe->width);
+				LowpassFilter lpU[3],lpV[3];
+				double s,ts;
+
+				for (unsigned int f=0;f < 3;f++) {
+					lpU[f].setFilter((315000000.00 * 4) / 88,chroma_cut*2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+					lpU[f].resetFilter(0);
+					lpV[f].setFilter((315000000.00 * 4) / 88,chroma_cut*2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
+					lpV[f].resetFilter(0);
+				}
+				for (x=0;x < dstframe->width;x++) {
+					s = ts = U[x];
+					for (unsigned int f=0;f < 3;f++) ts = lpU[f].lowpass(ts);
+					U[x] = s + ((s - ts) * vhs_out_sharpen_chroma);
+
+					s = ts = V[x];
+					for (unsigned int f=0;f < 3;f++) ts = lpV[f].lowpass(ts);
+					V[x] = s + ((s - ts) * vhs_out_sharpen_chroma);
+				}
+			}
+		}
+
+		if (!vhs_svideo_out) {
+            chroma_into_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude);
+            chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude_back);
+        }
+	}
+
+	if (video_chroma_loss != 0) {
+		for (y=field;y < dstframe->height;y += 2) {
+			int *U = fI + (y * dstframe->width);
+			int *V = fQ + (y * dstframe->width);
+
+			if ((((unsigned int)rand())%100000) < video_chroma_loss) {
+				memset(U,0,dstframe->width*sizeof(int));
+				memset(V,0,dstframe->width*sizeof(int));
+			}
+		}
+	}
+
     if (composite_out_chroma_lowpass) {
         if (composite_out_chroma_lowpass_lite)
             composite_lowpass_tv(dstframe,fY,fI,fQ,field,fieldno);
