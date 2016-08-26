@@ -759,7 +759,7 @@ double			vhs_out_sharpen_chroma = 0.85;
 
 bool			vhs_head_switching = false;
 double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
-double			vhs_head_switching_phase_noise = (((1.0 / 300)/*slight error, like most VHS tapes*/) / 262.5); // 1/300th of a scanline
+double			vhs_head_switching_phase_noise = (((1.0 / 500)/*slight error, like most VHS tapes*/) / 262.5); // 1/500th of a scanline
 
 bool            composite_in_chroma_lowpass = true; // apply chroma lowpass before composite encode
 bool            composite_out_chroma_lowpass = true;
@@ -1574,7 +1574,135 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 		}
 	}
 
-    chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude_back);
+	/* add video noise */
+	if (video_noise != 0) {
+		int noise = 0,noise_mod = (video_noise * 255) / 100;
+
+		for (y=field;y < dstframe->height;y += 2) {
+			int *Y = fY + (y * dstframe->width);
+
+			for (x=0;x < dstframe->width;x++) {
+				Y[x] += noise;
+				noise += ((int)((unsigned int)rand() % ((video_noise*2)+1))) - video_noise;
+				noise /= 2;
+			}
+		}
+	}
+
+	// VHS head switching noise
+	if (vhs_head_switching) {
+		unsigned int twidth = dstframe->width + (dstframe->width / 10);
+		unsigned int tx,x,p,x2,shy=0;
+		double noise = 0;
+		int shif,ishif,y;
+		double t;
+
+		if (vhs_head_switching_phase_noise != 0) {
+			unsigned int x = (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand() * (unsigned int)rand();
+			x %= 2000000000U;
+			noise = ((double)x / 1000000000U) - 1.0;
+			noise *= vhs_head_switching_phase_noise;
+		}
+
+		if (output_ntsc)
+			t = twidth * 262.5;
+		else
+			t = twidth * 312.5;
+
+		p = (unsigned int)(fmod(vhs_head_switching_phase + noise,1.0) * t);
+		x = p % (unsigned int)twidth;
+		y = ((p / (unsigned int)twidth) * 2) + field;
+
+		if (output_ntsc)
+			y -= (262 - 240) * 2;
+		else
+			y -= (312 - 288) * 2;
+
+		tx = x;
+		if (x >= (twidth/2))
+			ishif = x - twidth;
+		else
+			ishif = x;
+
+		shif = 0;
+		while (y < dstframe->height) {
+			if (y >= 0) {
+			    int *Y = fY + (y * dstframe->width);
+
+				if (shif != 0) {
+					int tmp[twidth];
+
+					/* WARNING: This is not 100% accurate. On real VHS you'd see the line shifted over and the next line's contents after hsync. */
+
+					/* luma. the chroma subcarrier is there, so this is all we have to do. */
+					x2 = (tx + twidth + (unsigned int)shif) % (unsigned int)twidth;
+					memset(tmp,0,sizeof(tmp));
+					memcpy(tmp,Y,dstframe->width*sizeof(int));
+					for (x=tx;x < dstframe->width;x++) {
+						Y[x] = tmp[x2];
+						if ((++x2) == twidth) x2 = 0;
+					}
+				}
+			}
+
+			if (shy == 0)
+				shif = ishif;
+			else
+				shif = (shif * 7) / 8;
+
+			tx = 0;
+			y += 2;
+			shy++;
+		}
+	}
+
+    if (!nocolor_subcarrier)
+        chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude_back);
+
+	/* add video noise */
+	if (video_chroma_noise != 0) {
+		int noiseU = 0,noiseV = 0,noise_mod = (video_chroma_noise * 255) / 100;
+
+		for (y=field;y < dstframe->height;y += 2) {
+			int *U = fI + (y * dstframe->width);
+			int *V = fQ + (y * dstframe->width);
+
+			for (x=0;x < dstframe->width;x++) {
+				U[x] += noiseU;
+				V[x] += noiseV;
+				noiseU += ((int)((unsigned int)rand() % ((video_chroma_noise*2)+1))) - video_chroma_noise;
+				noiseU /= 2;
+				noiseV += ((int)((unsigned int)rand() % ((video_chroma_noise*2)+1))) - video_chroma_noise;
+				noiseV /= 2;
+			}
+		}
+	}
+	if (video_chroma_phase_noise != 0) {
+		int noise = 0,noise_mod = (video_chroma_noise * 255) / 100;
+		double pi,u,v,u_,v_;
+
+		for (y=field;y < dstframe->height;y += 2) {
+			int *U = fI + (y * dstframe->width);
+			int *V = fQ + (y * dstframe->width);
+
+			noise += ((int)((unsigned int)rand() % ((video_chroma_phase_noise*2)+1))) - video_chroma_phase_noise;
+			noise /= 2;
+			pi = ((double)noise * M_PI) / 100;
+
+			for (x=0;x < dstframe->width;x++) {
+				u = U[x]; // think of 'u' as x-coord
+				v = V[x]; // and 'v' as y-coord
+
+				// then this 2D rotation then makes more sense
+				u_ = (u * cos(pi)) - (u * sin(pi));
+				v_ = (v * cos(pi)) + (v * sin(pi));
+
+				// put it back
+				U[x] = u_;
+				V[x] = v_;
+			}
+		}
+	}
 
     if (composite_out_chroma_lowpass) {
         if (composite_out_chroma_lowpass_lite)
