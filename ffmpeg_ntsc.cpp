@@ -1849,7 +1849,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 
 		if (!vhs_svideo_out) {
             chroma_into_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude);
-            chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude_back);
+            chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude);
         }
 	}
 
