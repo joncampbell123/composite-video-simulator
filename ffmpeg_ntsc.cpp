@@ -745,6 +745,67 @@ InputFile &new_input_file(void) {
 
 volatile int DIE = 0;
 
+HiLoComboPass		audio_hilopass;
+
+// preemphsis emuluation
+LowpassFilter		audio_linear_preemphasis_pre[2];
+LowpassFilter		audio_linear_preemphasis_post[2];
+
+double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
+double			composite_preemphasis_cut = 1000000;
+
+double			vhs_out_sharpen = 1.5;
+double			vhs_out_sharpen_chroma = 0.85;
+
+bool			vhs_head_switching = false;
+double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
+double			vhs_head_switching_phase_noise = (((1.0 / 300)/*slight error, like most VHS tapes*/) / 262.5); // 1/300th of a scanline
+
+bool            composite_in_chroma_lowpass = true; // apply chroma lowpass before composite encode
+bool            composite_out_chroma_lowpass = true;
+bool            composite_out_chroma_lowpass_lite = true;
+
+int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
+int		video_color_fields = 4;			// NTSC color framing
+int		video_chroma_noise = 0;
+int		video_chroma_phase_noise = 0;
+int		video_chroma_loss = 0;
+int		video_noise = 2;
+int		subcarrier_amplitude = 50;
+int		subcarrier_amplitude_back = 50;
+double		output_audio_hiss_db = -72;
+double		output_audio_linear_buzz = -42;	// how loud the "buzz" is audible in dBFS (S/N). Ever notice on old VHS tapes (prior to Hi-Fi) you can almost hear the video signal sync pulses in the audio?
+double		output_audio_highpass = 20; // highpass to filter out below 20Hz
+double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
+double		vhs_linear_high_boost = 0.25;
+// NTS:
+//   VHS Hi-Fi: 20Hz - 20KHz                  (70dBFS S/N)
+//   VHS SP:    100Hz - 10KHz                 (42dBFS S/N)
+//   VHS LP:    100Hz - 7KHz (right??)        (42dBFS S/N)
+//   VHS EP:    100Hz - 4KHz                  (42dBFS S/N)
+bool		output_vhs_hifi = true;
+bool		output_vhs_linear_stereo = false; // not common
+bool		output_vhs_linear_audio = false; // if true (non Hi-Fi) then we emulate hiss and noise of linear VHS tracks including the video sync pulses audible in the audio.
+bool		emulating_vhs = false;
+bool		emulating_preemphasis = true;		// emulate preemphasis
+bool		emulating_deemphasis = true;		// emulate deemphasis
+bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
+bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
+bool		vhs_chroma_vert_blend = true;		// if set, and VHS, blend vertically the chroma scanlines (as the VHS format does)
+bool		vhs_svideo_out = false;			// if not set, and VHS, video is recombined as if composite out on VCR
+bool        enable_composite_emulation = true; // if not set, video goes straight back out to the encoder.
+bool        enable_audio_emulation = true;
+
+int		output_audio_hiss_level = 0; // out of 10000
+
+enum {
+	VHS_SP=0,
+	VHS_LP,
+	VHS_EP
+};
+
+int		output_vhs_tape_speed = VHS_SP;
+
 void sigma(int x) {
 	if (++DIE >= 20) abort();
 }
@@ -772,7 +833,135 @@ static void help(const char *arg0) {
 	fprintf(stderr," -i <input file>               you can specify more than one input file, in order of layering\n");
 	fprintf(stderr," -o <output file>\n");
     fprintf(stderr," -d <n>                        Video delay buffer (n frames)\n");
-    fprintf(stderr," -n <n>                        New content averaging level (256=100% 0=0%)\n");
+	fprintf(stderr," -tvstd <pal|ntsc>\n");
+	fprintf(stderr," -vhs                      Emulation of VHS artifacts\n");
+	fprintf(stderr," -vhs-hifi <0|1>           (default on)\n");
+	fprintf(stderr," -vhs-speed <ep|lp|sp>     (default sp)\n");
+	fprintf(stderr," -preemphasis <0|1>        Enable preemphasis emulation\n");
+	fprintf(stderr," -deemphasis <0|1>         Enable deepmhasis emulation\n");
+	fprintf(stderr," -nocolor-subcarrier       Emulate color subcarrier but do not decode back (debug)\n");
+	fprintf(stderr," -nocolor-subcarrier-after-yc-sep Emulate Y/C subcarrier separation but do not decode back (debug)\n");
+	fprintf(stderr," -subcarrier-amp <0...100> Subcarrier amplitude (0 to 100 percent of luma)\n");
+	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
+	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
+	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
+	fprintf(stderr," -vhs-linear-video-crosstalk <x> Emulate video crosstalk in audio. Loudness in dBFS (0=100%)\n");
+	fprintf(stderr," -chroma-phase-noise <x>   Chroma phase noise (0...100)\n");
+	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
+	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
+	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
+	fprintf(stderr," -a <n>                    Pick the n'th audio stream\n");
+	fprintf(stderr," -an                       Don't render any audio stream\n");
+	fprintf(stderr," -v <n>                    Pick the n'th video stream\n");
+	fprintf(stderr," -vn                       Don't render any video stream\n");
+	fprintf(stderr," -comp-pre <s>             Composite preemphasis scale\n");
+	fprintf(stderr," -comp-cut <f>             Composite preemphasis freq\n");
+	fprintf(stderr," -comp-catv                Composite preemphasis preset, as if CATV #1\n");
+	fprintf(stderr," -comp-catv2               Composite preemphasis preset, as if CATV #2\n");
+	fprintf(stderr," -comp-catv3               Composite preemphasis preset, as if CATV #3\n");
+	fprintf(stderr," -vi                       Render video at frame rate, interlaced\n");
+	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
+	fprintf(stderr," -chroma-dropout <x>       Chroma scanline dropouts (0...10000)\n");
+	fprintf(stderr," -vhs-linear-high-boost <x> Boost high frequencies in VHS audio (linear tracks)\n");
+	fprintf(stderr," -vhs-head-switching <0|1> Enable/disable VHS head switching emulation\n");
+	fprintf(stderr," -vhs-head-switching-point <x> Head switching point (0....1)\n");
+	fprintf(stderr," -vhs-head-switching-noise-level <x> Head switching noise (variation)\n");
+    fprintf(stderr," -422                      Render in 4:2:2 colorspace\n");
+    fprintf(stderr," -420                      Render in 4:2:0 colorspace (default)\n"); // dammit Premiere >:(
+    fprintf(stderr," -nocomp                   Don't apply emulation, just transcode\n");
+    fprintf(stderr," -ss <t>                   Start transcoding from t seconds\n");
+    fprintf(stderr," -se <t>                   Stop transcoding at t seconds\n");
+    fprintf(stderr," -t <t>                    Transcode only t seconds\n");
+    fprintf(stderr," -in-composite-lowpass <n> Enable/disable chroma lowpass on composite in\n");
+    fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
+    fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
+    fprintf(stderr," -bkey-feedback <n>        Black key feedback (black level <= N)\n");
+	fprintf(stderr,"\n");
+	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
+	fprintf(stderr," Output will be rendered as interlaced video.\n");
+}
+
+static unsigned long long audio_proc_count = 0;
+static LowpassFilter audio_post_vhs_boost[2];
+
+static inline int clips16(const int x) {
+	if (x < -32768)
+		return -32768;
+	else if (x > 32767)
+		return 32767;
+
+	return x;
+}
+
+void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
+	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
+	double linear_buzz = dBFS(output_audio_linear_buzz);
+	double hsync_hz = output_ntsc ? /*NTSC*/15734 : /*PAL*/15625;
+	int vsync_lines = output_ntsc ? /*NTSC*/525 : /*PAL*/625;
+	int vpulse_end = output_ntsc ? /*NTSC*/10 : /*PAL*/12;
+	double hpulse_end = output_ntsc ? /*NTSC*/(hsync_hz * (4.7/*us*/ / 1000000)) : /*PAL*/(hsync_hz * (4.0/*us*/ / 1000000));
+
+	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
+		for (unsigned int c=0;c < output_audio_channels;c++) {
+			double s;
+
+			s = (double)audio[c] / 32768;
+
+			/* lowpass filter */
+			s = audio_hilopass.audiostate[c].filter(s);
+
+			/* preemphasis */
+			if (emulating_preemphasis) {
+				for (unsigned int i=0;i < output_audio_channels;i++) {
+					s = s + audio_linear_preemphasis_pre[i].highpass(s);
+				}
+			}
+
+			/* that faint "buzzing" noise on linear tracks because of audio/video crosstalk */
+			if (!output_vhs_hifi && linear_buzz > 0.000000001) {
+				const unsigned int oversample = 16;
+				for (unsigned int oi=0;oi < oversample;oi++) {
+					double t = ((((double)audio_proc_count * oversample) + oi) * hsync_hz) / output_audio_rate / oversample;
+					double hpos = fmod(t,1.0);
+					int vline = (int)fmod(floor(t + 0.0001/*fudge*/ - hpos),(double)vsync_lines / 2);
+					bool pulse = false;
+
+					if (hpos < hpulse_end)
+						pulse = true; // HSYNC
+					if (vline < vpulse_end)
+						pulse = true; // VSYNC
+
+					if (pulse)
+						s -= linear_buzz / oversample / 2;
+				}
+			}
+
+			/* analog limiting (when the signal is too loud) */
+			if (s > 1.0)
+				s = 1.0;
+			else if (s < -1.0)
+				s = -1.0;
+
+			/* hiss */
+			if (output_audio_hiss_level != 0)
+				s += ((double)(((int)((unsigned int)rand() % ((output_audio_hiss_level * 2) + 1))) - output_audio_hiss_level)) / 20000;
+
+			/* some VCRs (at least mine) will boost higher frequencies if playing linear tracks */
+			if (!output_vhs_hifi && vhs_linear_high_boost > 0)
+				s += audio_post_vhs_boost[c].highpass(s) * vhs_linear_high_boost;
+
+			/* deemphasis */
+			if (emulating_deemphasis) {
+				for (unsigned int i=0;i < output_audio_channels;i++) {
+					s = audio_linear_preemphasis_post[i].lowpass(s);
+				}
+			}
+
+			audio[c] = clips16(s * 32768);
+		}
+
+		audio_proc_count++;
+	}
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -834,6 +1023,174 @@ static int parse_argv(int argc,char **argv) {
 					return 1;
 				}
 			}
+            else if (!strcmp(a,"in-composite-lowpass")) {
+                composite_in_chroma_lowpass = atoi(argv[i++]) > 0;
+            }
+            else if (!strcmp(a,"out-composite-lowpass")) {
+                composite_out_chroma_lowpass = atoi(argv[i++]) > 0;
+            }
+            else if (!strcmp(a,"out-composite-lowpass-lite")) {
+                composite_out_chroma_lowpass_lite = atoi(argv[i++]) > 0;
+            }
+            else if (!strcmp(a,"nocomp")) {
+                enable_composite_emulation = false;
+                enable_audio_emulation = false;
+            }
+			else if (!strcmp(a,"vhs-head-switching-point")) {
+				vhs_head_switching_phase = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-head-switching-noise-level")) {
+				vhs_head_switching_phase_noise = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-head-switching")) {
+				int x = atoi(argv[i++]);
+				vhs_head_switching = (x > 0)?true:false;
+			}
+			else if (!strcmp(a,"vhs-linear-high-boost")) {
+				vhs_linear_high_boost = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"comp-pre")) {
+				composite_preemphasis = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"comp-cut")) {
+				composite_preemphasis_cut = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"comp-catv")) {
+				composite_preemphasis = 1.5;
+				composite_preemphasis_cut = 315000000 / 88 / 2;
+				video_chroma_phase_noise = 2;
+			}
+			else if (!strcmp(a,"comp-catv2")) {
+				composite_preemphasis = 2.5;
+				composite_preemphasis_cut = 315000000 / 88 / 2;
+				video_chroma_phase_noise = 4;
+			}
+			else if (!strcmp(a,"comp-catv3")) {
+				composite_preemphasis = 4;
+				composite_preemphasis_cut = 315000000 / 88 / 2;
+				video_chroma_phase_noise = 6;
+			}
+			else if (!strcmp(a,"vhs-linear-video-crosstalk")) {
+				output_audio_linear_buzz = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"chroma-phase-noise")) {
+				int x = atoi(argv[i++]);
+				video_chroma_phase_noise = x;
+			}
+			else if (!strcmp(a,"yc-recomb")) {
+				video_yc_recombine = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"audio-hiss")) {
+				output_audio_hiss_db = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-svideo")) {
+				int x = atoi(argv[i++]);
+				vhs_svideo_out = (x > 0);
+			}
+			else if (!strcmp(a,"vhs-chroma-vblend")) {
+				int x = atoi(argv[i++]);
+				vhs_chroma_vert_blend = (x > 0);
+			}
+			else if (!strcmp(a,"chroma-noise")) {
+				int x = atoi(argv[i++]);
+				video_chroma_noise = x;
+			}
+			else if (!strcmp(a,"noise")) {
+				int x = atoi(argv[i++]);
+				video_noise = x;
+			}
+			else if (!strcmp(a,"subcarrier-amp")) {
+				int x = atoi(argv[i++]);
+				subcarrier_amplitude = x;
+				subcarrier_amplitude_back = x;
+			}
+			else if (!strcmp(a,"nocolor-subcarrier")) {
+				nocolor_subcarrier = true;
+			}
+			else if (!strcmp(a,"nocolor-subcarrier-after-yc-sep")) {
+				nocolor_subcarrier_after_yc_sep = true;
+			}
+			else if (!strcmp(a,"chroma-dropout")) {
+				int x = atoi(argv[i++]);
+				video_chroma_loss = x;
+			}
+			else if (!strcmp(a,"vhs")) {
+				emulating_vhs = true;
+				vhs_head_switching = true;
+				emulating_preemphasis = false; // no preemphasis by default
+				emulating_deemphasis = false; // no preemphasis by default
+				output_audio_hiss_db = -70;
+				video_chroma_phase_noise = 4;
+				video_chroma_noise = 16;
+				video_chroma_loss = 4;
+				video_noise = 4; // VHS is a bit noisy
+			}
+			else if (!strcmp(a,"preemphasis")) {
+				int x = atoi(argv[i++]);
+				emulating_preemphasis = (x > 0);
+			}
+			else if (!strcmp(a,"deemphasis")) {
+				int x = atoi(argv[i++]);
+				emulating_deemphasis = (x > 0);
+			}
+			else if (!strcmp(a,"vhs-speed")) {
+				a = argv[i++];
+
+				emulating_vhs = true;			// implies -vhs
+				if (!strcmp(a,"ep")) {
+					output_vhs_tape_speed = VHS_EP;
+					video_chroma_phase_noise = 6;
+					video_chroma_noise = 22;
+					video_chroma_loss = 8;
+					video_noise = 6;
+				}
+				else if (!strcmp(a,"lp")) {
+					output_vhs_tape_speed = VHS_LP;
+					video_chroma_phase_noise = 5;
+					video_chroma_noise = 19;
+					video_chroma_loss = 6;
+					video_noise = 5;
+				}
+				else if (!strcmp(a,"sp")) {
+					output_vhs_tape_speed = VHS_SP;
+					video_chroma_phase_noise = 4;
+					video_chroma_noise = 16;
+					video_chroma_loss = 4;
+					video_noise = 4;
+				}
+				else {
+					fprintf(stderr,"Unknown vhs tape speed '%s'\n",a);
+					return 1;
+				}
+			}
+			else if (!strcmp(a,"vhs-hifi")) {
+				int x = atoi(argv[i++]);
+				output_vhs_hifi = (x > 0);
+				output_vhs_linear_audio = !output_vhs_hifi;
+				emulating_vhs = true;			// implies -vhs
+				if (output_vhs_hifi) {
+					emulating_preemphasis = true;
+					emulating_deemphasis = true;
+					output_audio_hiss_db = -70;
+				}
+				else {
+					output_audio_hiss_db = -42;
+				}
+			}
+			else if (!strcmp(a,"tvstd")) {
+				a = argv[i++];
+
+				if (!strcmp(a,"pal")) {
+					preset_PAL();
+				}
+				else if (!strcmp(a,"ntsc")) {
+					preset_NTSC();
+				}
+				else {
+					fprintf(stderr,"Unknown tv std '%s'\n",a);
+					return 1;
+				}
+			}
 			else {
 				fprintf(stderr,"Unknown switch '%s'\n",a);
 				return 1;
@@ -844,6 +1201,49 @@ static int parse_argv(int argc,char **argv) {
 			return 1;
 		}
 	}
+
+	if (emulating_vhs) {
+		if (output_vhs_hifi) {
+			output_audio_highpass = 20; // highpass to filter out below 20Hz
+			output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
+			output_audio_channels = 2;
+		}
+		else if (output_vhs_linear_audio) {
+			switch (output_vhs_tape_speed) {
+				case VHS_SP:
+					output_audio_highpass = 100; // highpass to filter out below 100Hz
+					output_audio_lowpass = 10000; // lowpass to filter out above 10KHz
+					break;
+				case VHS_LP:
+					output_audio_highpass = 100; // highpass to filter out below 100Hz
+					output_audio_lowpass = 7000; // lowpass to filter out above 7KHz
+					break;
+				case VHS_EP:
+					output_audio_highpass = 100; // highpass to filter out below 100Hz
+					output_audio_lowpass = 4000; // lowpass to filter out above 4KHz
+					break;
+			}
+
+			if (!output_vhs_linear_stereo)
+				output_audio_channels = 1;
+			else
+				output_audio_channels = 2;
+		}
+	}
+	else {
+		// not emulating VHS
+		output_audio_highpass = 20; // highpass to filter out below 20Hz
+		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
+		output_audio_channels = 2;
+	}
+
+	if (composite_preemphasis != 0)
+		subcarrier_amplitude_back += (50 * composite_preemphasis) / 4;
+
+	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
+
+	fprintf(stderr,"VHS head switching point: %.6f\n",vhs_head_switching_phase);
+	fprintf(stderr,"VHS head switching noise: %.6f\n",vhs_head_switching_phase_noise);
 
     if (output_file.empty()) {
         fprintf(stderr,"No output file specified\n");
@@ -861,7 +1261,8 @@ void process_audio(InputFile &fin) {
     if (fin.audio_dst_data == NULL || fin.audio_dst_data_out_samples == 0)
         return;
 
-    // we don't do anything with audio in this filter
+    if (enable_audio_emulation)
+        composite_audio_process((int16_t*)fin.audio_dst_data[0],fin.audio_dst_data_out_samples);
 }
 
 void write_out_audio(InputFile &fin) {
@@ -1025,8 +1426,6 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
             }
         }
     }
-
-    const int subcarrier_amplitude = 100;
 
     /* render chroma into luma, fake subcarrier */
     {
@@ -1232,6 +1631,44 @@ int main(int argc,char **argv) {
 	signal(SIGHUP,sigma);
 	signal(SIGQUIT,sigma);
 	signal(SIGTERM,sigma);
+
+	/* prepare audio filtering */
+	audio_hilopass.setChannels(output_audio_channels);
+	audio_hilopass.setRate(output_audio_rate);
+	audio_hilopass.setCutoff(output_audio_lowpass,output_audio_highpass); // hey, our filters aren't perfect
+	audio_hilopass.setPasses(6);
+	audio_hilopass.init();
+
+	/* high boost on playback */
+	for (unsigned int i=0;i < 2;i++)
+		audio_post_vhs_boost[i].setFilter(output_audio_rate,10000);
+
+	// TODO: VHS Hi-Fi is also documented to use 2:1 companding when recording, which we do not yet emulate
+
+	if (emulating_preemphasis) {
+		if (output_vhs_hifi) {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,16000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+		else {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+	}
+	if (emulating_deemphasis) {
+		if (output_vhs_hifi) {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,16000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+		else {
+			for (unsigned int i=0;i < output_audio_channels;i++) {
+				audio_linear_preemphasis_post[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
+			}
+		}
+	}
 
     /* prepare video encoding */
     for (size_t i=0;i <= output_avstream_video_frame_delay;i++) {
@@ -1473,6 +1910,7 @@ int main(int argc,char **argv) {
         output_avstream_video_frame.pop_back();
         if (nf != NULL) av_frame_free(&nf);
     }
+	audio_hilopass.clear();
 	av_write_trailer(output_avfmt);
 	if (output_avfmt != NULL && !(output_avfmt->oformat->flags & AVFMT_NOFILE))
 		avio_closep(&output_avfmt->pb);
