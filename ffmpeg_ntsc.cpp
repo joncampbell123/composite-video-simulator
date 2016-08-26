@@ -1488,7 +1488,7 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
             if ((x+2) < dstframe->width)
                 c = Y[x+2];
             else
-                c = Y[dstframe->width-1];
+                c = 0;
 
             sum -= delay[0];
             for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
@@ -1518,9 +1518,17 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
                 I[x] = -chroma[x+xi+0];
                 Q[x] = -chroma[x+xi+1];
             }
+            for (;x < dstframe->width;x += 2) {
+                I[x] = 0;
+                Q[x] = 0;
+            }
             for (x=0;(x+2) < dstframe->width;x += 2) {
                 I[x+1] = (I[x] + I[x+2]) >> 1;
                 Q[x+1] = (Q[x] + Q[x+2]) >> 1;
+            }
+            for (;x < dstframe->width;x++) {
+                I[x] = 0;
+                Q[x] = 0;
             }
         }
     }
