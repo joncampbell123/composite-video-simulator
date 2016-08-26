@@ -1485,7 +1485,11 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
         delay[2] = Y[0]; sum += delay[2];
         delay[3] = Y[1]; sum += delay[3];
         for (x=0;x < dstframe->width;x++) {
-            c = Y[x+2];
+            if ((x+2) < dstframe->width)
+                c = Y[x+2];
+            else
+                c = Y[dstframe->width-1];
+
             sum -= delay[0];
             for (unsigned int j=0;j < (4-1);j++) delay[j] = delay[j+1];
             delay[3] = c;
@@ -1500,7 +1504,7 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
             // NTSC 2 color frames long
             xi = (fieldno + (y >> 1)) & 3;
 
-            for (x=((4-xi)&3);x < dstframe->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
+            for (x=((4-xi)&3);(x+3) < dstframe->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
                 chroma[x+2] = -chroma[x+2];
                 chroma[x+3] = -chroma[x+3];
             }
