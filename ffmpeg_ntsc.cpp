@@ -754,7 +754,7 @@ LowpassFilter		audio_linear_preemphasis_post[2];
 double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
 double			composite_preemphasis_cut = 1000000;
 
-double			vhs_out_sharpen = 2.0;
+double			vhs_out_sharpen = 1.5;
 
 bool			vhs_head_switching = false;
 double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
@@ -1358,22 +1358,16 @@ void RGB_to_YIQ(int &Y,int &I,int &Q,int r,int g,int b) {
 
     dY = (0.30 * r) + (0.59 * g) + (0.11 * b);
 
-    Y = (int)dY;
-    I = (int)((-0.27 * (b - dY)) + ( 0.74 * (r - dY)));
-    Q = (int)(( 0.41 * (b - dY)) + ( 0.48 * (r - dY)));
+    Y = (int)(256 * dY);
+    I = (int)(256 * ((-0.27 * (b - dY)) + ( 0.74 * (r - dY))));
+    Q = (int)(256 * (( 0.41 * (b - dY)) + ( 0.48 * (r - dY))));
 }
 
 void YIQ_to_RGB(int &r,int &g,int &b,int Y,int I,int Q) {
-    if (Y < 0) Y = 0;
-    if (Y > 255) Y = 255;
-    if (I < -255) I = -255;
-    if (I > 255) I = 255;
-    if (Q < -255) Q = -255;
-    if (Q > 255) Q = 255;
     // FIXME
-    r = (int)(( 1.000 * Y) + ( 0.956 * I) + ( 0.621 * Q));
-    g = (int)(( 1.000 * Y) + (-0.272 * I) + (-0.647 * Q));
-    b = (int)(( 1.000 * Y) + (-1.106 * I) + ( 1.703 * Q));
+    r = (int)((( 1.000 * Y) + ( 0.956 * I) + ( 0.621 * Q)) / 256);
+    g = (int)((( 1.000 * Y) + (-0.272 * I) + (-0.647 * Q)) / 256);
+    b = (int)((( 1.000 * Y) + (-1.106 * I) + ( 1.703 * Q)) / 256);
     if (r < 0) r = 0;
     else if (r > 255) r = 255;
     if (g < 0) g = 0;
