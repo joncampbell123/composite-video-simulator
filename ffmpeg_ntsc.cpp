@@ -2046,6 +2046,17 @@ int main(int argc,char **argv) {
             fprintf(stderr,"Failed to alloc render frame2\n");
             return 1;
         }
+
+        if (output_avstream_video_codec_context->pix_fmt == AV_PIX_FMT_YUV422P) {
+            memset(output_avstream_video_encode_frame->data[0],16,output_avstream_video_encode_frame->linesize[0]*output_avstream_video_encode_frame->height);
+            memset(output_avstream_video_encode_frame->data[1],128,output_avstream_video_encode_frame->linesize[1]*output_avstream_video_encode_frame->height);
+            memset(output_avstream_video_encode_frame->data[2],128,output_avstream_video_encode_frame->linesize[2]*output_avstream_video_encode_frame->height);
+        }
+        else if (output_avstream_video_codec_context->pix_fmt == AV_PIX_FMT_YUV420P) {
+            memset(output_avstream_video_encode_frame->data[0],16,output_avstream_video_encode_frame->linesize[0]*(output_avstream_video_encode_frame->height/2));
+            memset(output_avstream_video_encode_frame->data[1],128,output_avstream_video_encode_frame->linesize[1]*(output_avstream_video_encode_frame->height/2));
+            memset(output_avstream_video_encode_frame->data[2],128,output_avstream_video_encode_frame->linesize[2]*(output_avstream_video_encode_frame->height/2));
+        }
     }
 
     if (output_avstream_video_resampler == NULL) {
