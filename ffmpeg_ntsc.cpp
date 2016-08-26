@@ -859,6 +859,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -comp-catv                Composite preemphasis preset, as if CATV #1\n");
 	fprintf(stderr," -comp-catv2               Composite preemphasis preset, as if CATV #2\n");
 	fprintf(stderr," -comp-catv3               Composite preemphasis preset, as if CATV #3\n");
+	fprintf(stderr," -comp-catv4               Composite preemphasis preset, as if CATV #4\n");
 	fprintf(stderr," -vi                       Render video at frame rate, interlaced\n");
 	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
 	fprintf(stderr," -chroma-dropout <x>       Chroma scanline dropouts (0...10000)\n");
@@ -1056,18 +1057,23 @@ static int parse_argv(int argc,char **argv) {
 				composite_preemphasis_cut = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"comp-catv")) {
-				composite_preemphasis = 1.5;
-				composite_preemphasis_cut = 315000000 / 88 / 2;
+				composite_preemphasis = 7;
+				composite_preemphasis_cut = 315000000 / 88;
 				video_chroma_phase_noise = 2;
 			}
 			else if (!strcmp(a,"comp-catv2")) {
-				composite_preemphasis = 2.5;
-				composite_preemphasis_cut = 315000000 / 88 / 2;
+				composite_preemphasis = 15;
+				composite_preemphasis_cut = 315000000 / 88;
 				video_chroma_phase_noise = 4;
 			}
 			else if (!strcmp(a,"comp-catv3")) {
-				composite_preemphasis = 4;
-				composite_preemphasis_cut = 315000000 / 88 / 2;
+				composite_preemphasis = 25;
+				composite_preemphasis_cut = (315000000 * 2) / 88;
+				video_chroma_phase_noise = 6;
+			}
+			else if (!strcmp(a,"comp-catv4")) {
+				composite_preemphasis = 40;
+				composite_preemphasis_cut = (315000000 * 4) / 88;
 				video_chroma_phase_noise = 6;
 			}
 			else if (!strcmp(a,"vhs-linear-video-crosstalk")) {
@@ -1238,7 +1244,7 @@ static int parse_argv(int argc,char **argv) {
 	}
 
 	if (composite_preemphasis != 0)
-		subcarrier_amplitude_back += (50 * composite_preemphasis) / 4;
+		subcarrier_amplitude_back += (50 * composite_preemphasis * (315000000 / 88)) / (4 * composite_preemphasis_cut);
 
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
 
@@ -1371,6 +1377,37 @@ void YIQ_to_RGB(int &r,int &g,int &b,int Y,int I,int Q) {
     else if (b > 255) b = 255;
 }
 
+/* lighter-weight filtering, probably what your old CRT does to reduce color fringes a bit */
+void composite_lowpass_tv(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int field,unsigned long long fieldno) {
+    unsigned int x,y;
+
+    {
+        for (unsigned int p=1;p <= 2;p++) {
+            for (y=field;y < dstframe->height;y += 2) {
+                int *P = ((p == 1) ? fI : fQ) + (dstframe->width * y);
+                LowpassFilter lp[3];
+                double cutoff;
+                int delay;
+                double s;
+
+                cutoff = 2600000;
+                delay = 1;
+
+                for (unsigned int f=0;f < 3;f++) {
+                    lp[f].setFilter((315000000.00 * 4) / 88,cutoff); // 315/88 Mhz rate * 4
+                    lp[f].resetFilter(0);
+                }
+
+                for (x=0;x < dstframe->width;x++) {
+                    s = P[x];
+                    for (unsigned int f=0;f < 3;f++) s = lp[f].lowpass(s);
+                    if (x >= delay) P[x-delay] = s;
+                }
+            }
+        }
+    }
+}
+
 void composite_lowpass(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int field,unsigned long long fieldno) {
     unsigned int x,y;
 
@@ -1402,7 +1439,7 @@ void composite_lowpass(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fi
     }
 }
 
-void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int field,unsigned long long fieldno) {
+void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int field,unsigned long long fieldno,int subcarrier_amplitude) {
     /* render chroma into luma, fake subcarrier */
     unsigned int x,y;
 
@@ -1432,7 +1469,7 @@ void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
     }
 }
 
-void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int field,unsigned long long fieldno) {
+void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int field,unsigned long long fieldno,int subcarrier_amplitude) {
     /* decode color from luma */
     int chroma[dstframe->width]; // WARNING: This is more GCC-specific C++ than normal
     unsigned int x,y;
@@ -1515,9 +1552,36 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
         }
     }
 
-    composite_lowpass(dstframe,fY,fI,fQ,field,fieldno);
-    chroma_into_luma(dstframe,fY,fI,fQ,field,fieldno);
-    chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno);
+    if (composite_in_chroma_lowpass) 
+        composite_lowpass(dstframe,fY,fI,fQ,field,fieldno);
+
+    chroma_into_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude);
+
+	/* video composite preemphasis */
+	if (composite_preemphasis != 0 && composite_preemphasis_cut > 0) {
+		for (y=field;y < dstframe->height;y += 2) {
+			int *Y = fY + (y * dstframe->width);
+			LowpassFilter pre;
+			double s;
+
+			pre.setFilter((315000000.00 * 4) / 88,composite_preemphasis_cut); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			pre.resetFilter(16);
+			for (x=0;x < dstframe->width;x++) {
+				s = Y[x];
+				s += pre.highpass(s) * composite_preemphasis;
+				Y[x] = (int)s;
+			}
+		}
+	}
+
+    chroma_from_luma(dstframe,fY,fI,fQ,field,fieldno,subcarrier_amplitude_back);
+
+    if (composite_out_chroma_lowpass) {
+        if (composite_out_chroma_lowpass_lite)
+            composite_lowpass_tv(dstframe,fY,fI,fQ,field,fieldno);
+        else
+            composite_lowpass(dstframe,fY,fI,fQ,field,fieldno);
+    }
 
     for (y=field;y < dstframe->height;y += 2) {
         dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
