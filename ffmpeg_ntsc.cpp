@@ -754,8 +754,7 @@ LowpassFilter		audio_linear_preemphasis_post[2];
 double			composite_preemphasis = 0;	// analog artifacts related to anything that affects the raw composite signal i.e. CATV modulation
 double			composite_preemphasis_cut = 1000000;
 
-double			vhs_out_sharpen = 1.5;
-double			vhs_out_sharpen_chroma = 0.85;
+double			vhs_out_sharpen = 2.0;
 
 bool			vhs_head_switching = false;
 double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
@@ -1715,17 +1714,17 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 			case VHS_SP:
 				luma_cut = 2400000; // 3.0MHz x 80%
 				chroma_cut = 320000; // 400KHz x 80%
-				chroma_delay = 4;
+				chroma_delay = 9;
 				break;
 			case VHS_LP:
 				luma_cut = 1900000; // ..
 				chroma_cut = 300000; // 375KHz x 80%
-				chroma_delay = 5;
+				chroma_delay = 12;
 				break;
 			case VHS_EP:
 				luma_cut = 1400000; // ..
 				chroma_cut = 280000; // 350KHz x 80%
-				chroma_delay = 6;
+				chroma_delay = 14;
 				break;
 			default:
 				abort();
@@ -1812,37 +1811,13 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 				double s,ts;
 
 				for (unsigned int f=0;f < 3;f++) {
-					lp[f].setFilter((315000000.00 * 4) / 88,luma_cut*2); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
+					lp[f].setFilter((315000000.00 * 4) / 88,luma_cut*4); // 315/88 Mhz rate * 4  vs 3.0MHz cutoff
 					lp[f].resetFilter(0);
 				}
 				for (x=0;x < dstframe->width;x++) {
 					s = ts = Y[x];
 					for (unsigned int f=0;f < 3;f++) ts = lp[f].lowpass(ts);
-					Y[x] = s + ((s - ts) * vhs_out_sharpen);
-				}
-			}
-
-			// chroma
-			for (y=field;y < dstframe->height;y += 2) {
-				int *U = fI + (y * dstframe->width);
-				int *V = fQ + (y * dstframe->width);
-				LowpassFilter lpU[3],lpV[3];
-				double s,ts;
-
-				for (unsigned int f=0;f < 3;f++) {
-					lpU[f].setFilter((315000000.00 * 4) / 88,chroma_cut*2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
-					lpU[f].resetFilter(0);
-					lpV[f].setFilter((315000000.00 * 4) / 88,chroma_cut*2); // 315/88 Mhz rate * 4 (divide by 2 for 4:2:2) vs 400KHz cutoff
-					lpV[f].resetFilter(0);
-				}
-				for (x=0;x < dstframe->width;x++) {
-					s = ts = U[x];
-					for (unsigned int f=0;f < 3;f++) ts = lpU[f].lowpass(ts);
-					U[x] = s + ((s - ts) * vhs_out_sharpen_chroma);
-
-					s = ts = V[x];
-					for (unsigned int f=0;f < 3;f++) ts = lpV[f].lowpass(ts);
-					V[x] = s + ((s - ts) * vhs_out_sharpen_chroma);
+					Y[x] = s + ((s - ts) * vhs_out_sharpen * 2);
 				}
 			}
 		}
