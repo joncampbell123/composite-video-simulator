@@ -1244,7 +1244,7 @@ static int parse_argv(int argc,char **argv) {
 	}
 
 	if (composite_preemphasis != 0)
-		subcarrier_amplitude_back += (50 * composite_preemphasis * (315000000 / 88)) / (4 * composite_preemphasis_cut);
+		subcarrier_amplitude_back += (50 * composite_preemphasis * (315000000 / 88)) / (2 * composite_preemphasis_cut);
 
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
 
