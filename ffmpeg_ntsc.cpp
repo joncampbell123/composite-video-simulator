@@ -1364,6 +1364,12 @@ void RGB_to_YIQ(int &Y,int &I,int &Q,int r,int g,int b) {
 }
 
 void YIQ_to_RGB(int &r,int &g,int &b,int Y,int I,int Q) {
+    if (Y < 0) Y = 0;
+    if (Y > 255) Y = 255;
+    if (I < -255) I = -255;
+    if (I > 255) I = 255;
+    if (Q < -255) Q = -255;
+    if (Q > 255) Q = 255;
     // FIXME
     r = (int)(( 1.000 * Y) + ( 0.956 * I) + ( 0.621 * Q));
     g = (int)(( 1.000 * Y) + (-0.272 * I) + (-0.647 * Q));
@@ -1540,6 +1546,10 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     fY = new int[dstframe->width * dstframe->height];
     fI = new int[dstframe->width * dstframe->height];
     fQ = new int[dstframe->width * dstframe->height];
+
+    memset(fY,0,sizeof(dstframe->width*dstframe->height)*sizeof(int));
+    memset(fI,0,sizeof(dstframe->width*dstframe->height)*sizeof(int));
+    memset(fQ,0,sizeof(dstframe->width*dstframe->height)*sizeof(int));
 
     for (y=field;y < dstframe->height;y += 2) {
         sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
