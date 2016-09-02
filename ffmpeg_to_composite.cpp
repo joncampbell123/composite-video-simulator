@@ -1334,6 +1334,12 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"width")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                output_width = (int)strtoul(a,NULL,0);
+                if (output_width < 32) return 1;
+            }
             else if (!strcmp(a,"comp-phase")) {
                 video_scanline_phase_shift = atoi(argv[i++]);
                 if (!(video_scanline_phase_shift == 0 || video_scanline_phase_shift == 90 ||
