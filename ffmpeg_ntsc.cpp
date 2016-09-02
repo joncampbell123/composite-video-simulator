@@ -1463,7 +1463,7 @@ void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
         if (video_scanline_phase_shift == 90)
             xi = (fieldno + (y >> 1)) & 3;
         else if (video_scanline_phase_shift == 180)
-            xi = ((fieldno << 1) + (y & 2)) & 3;
+            xi = (fieldno + y) & 2;
         else if (video_scanline_phase_shift == 270)
             xi = (fieldno - (y >> 1)) & 3;
         else
@@ -1520,7 +1520,7 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
             if (video_scanline_phase_shift == 90)
                 xi = (fieldno + (y >> 1)) & 3;
             else if (video_scanline_phase_shift == 180)
-                xi = ((fieldno << 1) + (y & 2)) & 3;
+                xi = (fieldno + y) & 2;
             else if (video_scanline_phase_shift == 270)
                 xi = (fieldno - (y >> 1)) & 3;
             else

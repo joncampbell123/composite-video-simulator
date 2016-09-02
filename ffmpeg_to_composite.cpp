@@ -445,7 +445,7 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
             if (video_scanline_phase_shift == 90)
                 xi = (fieldno + (y >> 1)) & 3;
             else if (video_scanline_phase_shift == 180)
-                xi = ((fieldno << 1) + (y & 2)) & 3;
+                xi = (fieldno + y) & 2;
             else if (video_scanline_phase_shift == 270)
                 xi = (fieldno - (y >> 1)) & 3;
             else
@@ -513,7 +513,7 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
                 if (video_scanline_phase_shift == 90)
                     xi = (fieldno + (y >> 1)) & 3;
                 else if (video_scanline_phase_shift == 180)
-                    xi = ((fieldno << 1) + (y & 2)) & 3;
+                    xi = (fieldno + y) & 2;
                 else if (video_scanline_phase_shift == 270)
                     xi = (fieldno - (y >> 1)) & 3;
                 else
