@@ -209,6 +209,7 @@ bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
+int     video_scanline_phase_shift = 180;
 
 #define RGBTRIPLET(r,g,b)       (((uint32_t)(r) << (uint32_t)16) + ((uint32_t)(g) << (uint32_t)8) + ((uint32_t)(b) << (uint32_t)0))
 
@@ -875,6 +876,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
     fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
     fprintf(stderr," -bkey-feedback <n>        Black key feedback (black level <= N)\n");
+    fprintf(stderr," -comp-phase <n>           NTSC subcarrier phase per scanline (0, 90, 180, or 270)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -976,6 +978,14 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+            }
+            else if (!strcmp(a,"comp-phase")) {
+                video_scanline_phase_shift = atoi(argv[i++]);
+                if (!(video_scanline_phase_shift == 0 || video_scanline_phase_shift == 90 ||
+                    video_scanline_phase_shift == 180 || video_scanline_phase_shift == 270)) {
+                    fprintf(stderr,"Invalid phase\n");
+                    return 1;
+                }
             }
             else if (!strcmp(a,"width")) {
                 a = argv[i++];
@@ -1450,7 +1460,14 @@ void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
         unsigned int xc = dstframe->width;
         unsigned int xi;
 
-        xi = (fieldno + (y >> 1)) & 3;
+        if (video_scanline_phase_shift == 90)
+            xi = (fieldno + (y >> 1)) & 3;
+        else if (video_scanline_phase_shift == 180)
+            xi = ((fieldno << 1) + (y & 2)) & 3;
+        else if (video_scanline_phase_shift == 270)
+            xi = (fieldno - (y >> 1)) & 3;
+        else
+            xi = 0;
 
         /* remember: this code assumes 4:2:2 */
         /* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
@@ -1500,8 +1517,14 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
         {
             unsigned int xi = 0;
 
-            // NTSC 2 color frames long
-            xi = (fieldno + (y >> 1)) & 3;
+            if (video_scanline_phase_shift == 90)
+                xi = (fieldno + (y >> 1)) & 3;
+            else if (video_scanline_phase_shift == 180)
+                xi = ((fieldno << 1) + (y & 2)) & 3;
+            else if (video_scanline_phase_shift == 270)
+                xi = (fieldno - (y >> 1)) & 3;
+            else
+                xi = 0;
 
             for (x=((4-xi)&3);(x+3) < dstframe->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
                 chroma[x+2] = -chroma[x+2];

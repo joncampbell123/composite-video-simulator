@@ -279,6 +279,7 @@ bool            composite_out_chroma_lowpass_lite = true;
 
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
+int     video_scanline_phase_shift = 180;
 int		video_chroma_noise = 0;
 int		video_chroma_phase_noise = 0;
 int		video_chroma_loss = 0;
@@ -441,8 +442,15 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 		unsigned int xi;
 
 		if (output_ntsc) { // NTSC 2 color frames long
-			xi = (fieldno + (y >> 1)) & 3;
-		}
+            if (video_scanline_phase_shift == 90)
+                xi = (fieldno + (y >> 1)) & 3;
+            else if (video_scanline_phase_shift == 180)
+                xi = ((fieldno << 1) + (y & 2)) & 3;
+            else if (video_scanline_phase_shift == 270)
+                xi = (fieldno - (y >> 1)) & 3;
+            else
+                xi = 0;
+        }
 		else/*PAL*/ {
 			// FIXME: Is this right?
 			xi = (fieldno + y) & 3;
@@ -502,8 +510,15 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 			unsigned int xi = 0;
 
 			if (output_ntsc) { // NTSC 2 color frames long
-				xi = (fieldno + (y >> 1)) & 3;
-			}
+                if (video_scanline_phase_shift == 90)
+                    xi = (fieldno + (y >> 1)) & 3;
+                else if (video_scanline_phase_shift == 180)
+                    xi = ((fieldno << 1) + (y & 2)) & 3;
+                else if (video_scanline_phase_shift == 270)
+                    xi = (fieldno - (y >> 1)) & 3;
+                else
+                    xi = 0;
+            }
 			else/*PAL*/ {
 				// FIXME: Is this right?
 				xi = (fieldno + y) & 3;
@@ -1299,6 +1314,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
     fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
     fprintf(stderr," -bkey-feedback <n>        Black key feedback (black level <= N)\n");
+    fprintf(stderr," -comp-phase <n>           NTSC subcarrier phase per scanline (0, 90, 180, or 270)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -1318,6 +1334,14 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"comp-phase")) {
+                video_scanline_phase_shift = atoi(argv[i++]);
+                if (!(video_scanline_phase_shift == 0 || video_scanline_phase_shift == 90 ||
+                    video_scanline_phase_shift == 180 || video_scanline_phase_shift == 270)) {
+                    fprintf(stderr,"Invalid phase\n");
+                    return 1;
+                }
+            }
             else if (!strcmp(a,"bkey-feedback")) {
                 black_key_level_feedback = atoi(argv[i++]);
             }
