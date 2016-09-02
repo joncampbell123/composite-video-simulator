@@ -210,6 +210,7 @@ bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 int     video_scanline_phase_shift = 180;
+int     video_scanline_phase_shift_offset = 0;
 
 #define RGBTRIPLET(r,g,b)       (((uint32_t)(r) << (uint32_t)16) + ((uint32_t)(g) << (uint32_t)8) + ((uint32_t)(b) << (uint32_t)0))
 
@@ -979,6 +980,9 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
             }
+            else if (!strcmp(a,"comp-phase-offset")) {
+                video_scanline_phase_shift_offset = atoi(argv[i++]);
+            }
             else if (!strcmp(a,"comp-phase")) {
                 video_scanline_phase_shift = atoi(argv[i++]);
                 if (!(video_scanline_phase_shift == 0 || video_scanline_phase_shift == 90 ||
@@ -1461,11 +1465,11 @@ void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
         unsigned int xi;
 
         if (video_scanline_phase_shift == 90)
-            xi = (fieldno + (y >> 1)) & 3;
+            xi = (fieldno + video_scanline_phase_shift_offset + (y >> 1)) & 3;
         else if (video_scanline_phase_shift == 180)
-            xi = (fieldno + y) & 2;
+            xi = (((fieldno + y) & 2) + video_scanline_phase_shift_offset) & 3;
         else if (video_scanline_phase_shift == 270)
-            xi = (fieldno - (y >> 1)) & 3;
+            xi = (fieldno + video_scanline_phase_shift_offset - (y >> 1)) & 3;
         else
             xi = 0;
 
@@ -1518,11 +1522,11 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
             unsigned int xi = 0;
 
             if (video_scanline_phase_shift == 90)
-                xi = (fieldno + (y >> 1)) & 3;
+                xi = (fieldno + video_scanline_phase_shift_offset + (y >> 1)) & 3;
             else if (video_scanline_phase_shift == 180)
-                xi = (fieldno + y) & 2;
+                xi = (((fieldno + y) & 2) + video_scanline_phase_shift_offset) & 3;
             else if (video_scanline_phase_shift == 270)
-                xi = (fieldno - (y >> 1)) & 3;
+                xi = (fieldno + video_scanline_phase_shift_offset - (y >> 1)) & 3;
             else
                 xi = 0;
 

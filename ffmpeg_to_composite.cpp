@@ -280,6 +280,7 @@ bool            composite_out_chroma_lowpass_lite = true;
 int		video_yc_recombine = 0;			// additional Y/C combine/sep phases (testing)
 int		video_color_fields = 4;			// NTSC color framing
 int     video_scanline_phase_shift = 180;
+int     video_scanline_phase_shift_offset = 0;
 int		video_chroma_noise = 0;
 int		video_chroma_phase_noise = 0;
 int		video_chroma_loss = 0;
@@ -443,11 +444,11 @@ void composite_video_yuv_to_ntsc(AVFrame *dst,unsigned int field,unsigned long l
 
 		if (output_ntsc) { // NTSC 2 color frames long
             if (video_scanline_phase_shift == 90)
-                xi = (fieldno + (y >> 1)) & 3;
+                xi = (fieldno + video_scanline_phase_shift_offset + (y >> 1)) & 3;
             else if (video_scanline_phase_shift == 180)
-                xi = (fieldno + y) & 2;
+                xi = (((fieldno + y) & 2) + video_scanline_phase_shift_offset) & 3;
             else if (video_scanline_phase_shift == 270)
-                xi = (fieldno - (y >> 1)) & 3;
+                xi = (fieldno + video_scanline_phase_shift_offset - (y >> 1)) & 3;
             else
                 xi = 0;
         }
@@ -511,11 +512,11 @@ void composite_ntsc_to_yuv(AVFrame *dst,unsigned int field,unsigned long long fi
 
 			if (output_ntsc) { // NTSC 2 color frames long
                 if (video_scanline_phase_shift == 90)
-                    xi = (fieldno + (y >> 1)) & 3;
+                    xi = (fieldno + video_scanline_phase_shift_offset + (y >> 1)) & 3;
                 else if (video_scanline_phase_shift == 180)
-                    xi = (fieldno + y) & 2;
+                    xi = (((fieldno + y) & 2) + video_scanline_phase_shift_offset) & 3;
                 else if (video_scanline_phase_shift == 270)
-                    xi = (fieldno - (y >> 1)) & 3;
+                    xi = (fieldno + video_scanline_phase_shift_offset - (y >> 1)) & 3;
                 else
                     xi = 0;
             }
@@ -1339,6 +1340,9 @@ static int parse_argv(int argc,char **argv) {
                 if (a == NULL) return 1;
                 output_width = (int)strtoul(a,NULL,0);
                 if (output_width < 32) return 1;
+            }
+            else if (!strcmp(a,"comp-phase-offset")) {
+                video_scanline_phase_shift_offset = atoi(argv[i++]);
             }
             else if (!strcmp(a,"comp-phase")) {
                 video_scanline_phase_shift = atoi(argv[i++]);
