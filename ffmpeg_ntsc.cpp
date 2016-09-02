@@ -1535,6 +1535,7 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
 
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,unsigned int field,unsigned long long fieldno) {
+    unsigned char opposite;
     uint32_t *dscan,*sscan;
     unsigned int x,y;
     unsigned int shr;
@@ -1548,6 +1549,11 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     if (dstframe->width != srcframe->width) return;
     if (dstframe->height != srcframe->height) return;
 
+    if (srcframe->interlaced_frame)
+        opposite = (srcframe->top_field_first ? 1 : 0);
+    else
+        opposite = 0;
+
     fY = new int[dstframe->width * dstframe->height];
     fI = new int[dstframe->width * dstframe->height];
     fQ = new int[dstframe->width * dstframe->height];
@@ -1557,7 +1563,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
     memset(fQ,0,sizeof(dstframe->width*dstframe->height)*sizeof(int));
 
     for (y=field;y < dstframe->height;y += 2) {
-        sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
+        sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * std::min(y+opposite,(unsigned int)dstframe->height-1U)));
         for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
             r  = (*sscan >> 16UL) & 0xFF;
             g  = (*sscan >>  8UL) & 0xFF;
