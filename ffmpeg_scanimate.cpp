@@ -240,6 +240,9 @@ public:
             if (avpkt.stream_index >= input_avfmt->nb_streams)
                 continue;
 
+            // ugh... this can happen if the source is an AVI file
+            if (avpkt.pts == AV_NOPTS_VALUE) avpkt.pts = avpkt.dts;
+
             /* track time and keep things monotonic for our code */
             if (avpkt.pts != AV_NOPTS_VALUE) {
                 t = avpkt.pts * av_q2d(input_avfmt->streams[avpkt.stream_index]->time_base);
@@ -284,10 +287,6 @@ public:
                 if (got_video) fprintf(stderr,"Video content lost\n");
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&avpkt,input_avstream_video->time_base,m); // convert to FIELD number
-
-                // ugh... this can happen if the source is an AVI file
-                if (avpkt.pts == AV_NOPTS_VALUE) avpkt.pts = avpkt.dts;
-
                 handle_frame(/*&*/avpkt); // will set got_video
                 break;
 			}

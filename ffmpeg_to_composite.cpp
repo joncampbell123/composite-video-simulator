@@ -2210,6 +2210,9 @@ int main(int argc,char **argv) {
 		while (av_read_frame(input_avfmt,&pkt) >= 0) {
 			if (DIE != 0) break;
 
+            // ugh... this can happen if the source is an AVI file
+            if (pkt.pts == AV_NOPTS_VALUE) pkt.pts = pkt.dts;
+
             /* track time and keep things monotonic for our code */
             if (pkt.stream_index < input_avfmt->nb_streams) {
                 if (pkt.pts != AV_NOPTS_VALUE) {
@@ -2261,9 +2264,6 @@ int main(int argc,char **argv) {
 			else if (input_avstream_video != NULL && pkt.stream_index == input_avstream_video->index) {
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&pkt,input_avstream_video->time_base,m); // convert to FIELD number
-
-                // ugh... this can happen if the source is an AVI file
-                if (pkt.pts == AV_NOPTS_VALUE) pkt.pts = pkt.dts;
 
                 input_avstream_video_codec_context->reordered_opaque = av_frame_counter;
                 {
