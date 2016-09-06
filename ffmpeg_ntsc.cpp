@@ -1471,7 +1471,7 @@ void chroma_into_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
         else if (video_scanline_phase_shift == 270)
             xi = (fieldno + video_scanline_phase_shift_offset - (y >> 1)) & 3;
         else
-            xi = 0;
+            xi = video_scanline_phase_shift_offset & 3;
 
         /* remember: this code assumes 4:2:2 */
         /* NTS: the subcarrier is two sine waves superimposed on top of each other, 90 degrees apart */
@@ -1528,7 +1528,7 @@ void chroma_from_luma(AVFrame *dstframe,int *fY,int *fI,int *fQ,unsigned int fie
             else if (video_scanline_phase_shift == 270)
                 xi = (fieldno + video_scanline_phase_shift_offset - (y >> 1)) & 3;
             else
-                xi = 0;
+                xi = video_scanline_phase_shift_offset & 3;
 
             for (x=((4-xi)&3);(x+3) < dstframe->width;x += 4) { // flip the part of the sine wave that would correspond to negative U and V values
                 chroma[x+2] = -chroma[x+2];
