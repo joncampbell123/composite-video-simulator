@@ -1606,12 +1606,13 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 
 	/* video composite preemphasis */
 	if (composite_preemphasis != 0 && composite_preemphasis_cut > 0) {
+	  
 		for (y=field;y < dstframe->height;y += 2) {
 			int *Y = fY + (y * dstframe->width);
 			LowpassFilter pre;
 			double s;
-
-			pre.setFilter((315000000.00 * 4) / 88,composite_preemphasis_cut); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
+			
+	                pre.setFilter((315000000.00 * 4) / 88,composite_preemphasis_cut); // 315/88 Mhz rate * 4  vs 1.0MHz cutoff
 			pre.resetFilter(16);
 			for (x=0;x < dstframe->width;x++) {
 				s = Y[x];
@@ -1623,14 +1624,14 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 
 	/* add video noise */
 	if (video_noise != 0) {
-		int noise = 0,noise_mod = (video_noise * 255) / 100;
+	  int noise = 0, noise_mod = (video_noise*2)+1; /* ,noise_mod = (video_noise * 255) / 100; */
 
 		for (y=field;y < dstframe->height;y += 2) {
 			int *Y = fY + (y * dstframe->width);
 
 			for (x=0;x < dstframe->width;x++) {
 				Y[x] += noise;
-				noise += ((int)((unsigned int)rand() % ((video_noise*2)+1))) - video_noise;
+				noise += ((int)((unsigned int)rand() % noise_mod)) - video_noise;
 				noise /= 2;
 			}
 		}
@@ -1726,7 +1727,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 	}
 	if (video_chroma_phase_noise != 0) {
 		int noise = 0,noise_mod = (video_chroma_noise * 255) / 100;
-		double pi,u,v,u_,v_;
+		double pi,u,v,u_,v_, sinpi, cospi;
 
 		for (y=field;y < dstframe->height;y += 2) {
 			int *U = fI + (y * dstframe->width);
@@ -1736,13 +1737,16 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 			noise /= 2;
 			pi = ((double)noise * M_PI) / 100;
 
+			sinpi = sin(pi);
+			cospi = cos(pi);
+			
 			for (x=0;x < dstframe->width;x++) {
 				u = U[x]; // think of 'u' as x-coord
 				v = V[x]; // and 'v' as y-coord
 
 				// then this 2D rotation then makes more sense
-				u_ = (u * cos(pi)) - (u * sin(pi));
-				v_ = (v * cos(pi)) + (v * sin(pi));
+				u_ = (u * cospi) - (v * sinpi);
+				v_ = (u * sinpi) + (v * cospi);
 
 				// put it back
 				U[x] = u_;
