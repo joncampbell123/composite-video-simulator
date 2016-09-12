@@ -11,10 +11,7 @@ bin_PROGRAMS = \
 	ffmpeg_scanimate \
 	ffmpeg_ntsc
 
-noinst_PROGRAMS = \
-	dx
-
-dx_SOURCES = dx.cpp
+noinst_PROGRAMS =
 
 ffmpeg_to_composite_SOURCES = ffmpeg_to_composite.cpp
 ffmpeg_to_composite_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
