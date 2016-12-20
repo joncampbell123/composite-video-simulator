@@ -758,7 +758,8 @@ double			composite_preemphasis_cut = 1000000;
 double			vhs_out_sharpen = 1.5;
 
 bool			vhs_head_switching = false;
-double			vhs_head_switching_phase = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
+double			vhs_head_switching_point = 1.0 - ((4.5+0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
+double			vhs_head_switching_phase = ((1.0-0.01/*slight error, like most VHS tapes*/) / 262.5); // 4 scanlines NTSC up from vsync
 double			vhs_head_switching_phase_noise = (((1.0 / 500)/*slight error, like most VHS tapes*/) / 262.5); // 1/500th of a scanline
 
 bool            composite_in_chroma_lowpass = true; // apply chroma lowpass before composite encode
@@ -866,6 +867,7 @@ static void help(const char *arg0) {
 	fprintf(stderr," -vhs-linear-high-boost <x> Boost high frequencies in VHS audio (linear tracks)\n");
 	fprintf(stderr," -vhs-head-switching <0|1> Enable/disable VHS head switching emulation\n");
 	fprintf(stderr," -vhs-head-switching-point <x> Head switching point (0....1)\n");
+	fprintf(stderr," -vhs-head-switching-phase <x> Head switching displacement (-1....1)\n");
 	fprintf(stderr," -vhs-head-switching-noise-level <x> Head switching noise (variation)\n");
     fprintf(stderr," -422                      Render in 4:2:2 colorspace\n");
     fprintf(stderr," -420                      Render in 4:2:0 colorspace (default)\n"); // dammit Premiere >:(
@@ -1050,6 +1052,9 @@ static int parse_argv(int argc,char **argv) {
                 enable_audio_emulation = false;
             }
 			else if (!strcmp(a,"vhs-head-switching-point")) {
+				vhs_head_switching_point = atof(argv[i++]);
+			}
+			else if (!strcmp(a,"vhs-head-switching-phase")) {
 				vhs_head_switching_phase = atof(argv[i++]);
 			}
 			else if (!strcmp(a,"vhs-head-switching-noise-level")) {
@@ -1657,9 +1662,11 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile,un
 		else
 			t = twidth * 312.5;
 
+		p = (unsigned int)(fmod(vhs_head_switching_point + noise,1.0) * t);
+		y = ((p / (unsigned int)twidth) * 2) + field;
+
 		p = (unsigned int)(fmod(vhs_head_switching_phase + noise,1.0) * t);
 		x = p % (unsigned int)twidth;
-		y = ((p / (unsigned int)twidth) * 2) + field;
 
 		if (output_ntsc)
 			y -= (262 - 240) * 2;
