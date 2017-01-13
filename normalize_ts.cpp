@@ -62,6 +62,7 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, cons
 int main(int argc, char **argv)
 {
     AVOutputFormat *ofmt = NULL;
+    AVDictionary *mp4_dict = NULL;
     AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
     AVPacket pkt;
     const char *in_filename, *out_filename;
@@ -136,7 +137,10 @@ int main(int argc, char **argv)
         }
     }
 
-    ret = avformat_write_header(ofmt_ctx, NULL);
+    av_dict_set(&mp4_dict, "movflags", "faststart", 0);
+    av_dict_set(&mp4_dict, "chunk_duration", "30", 0);
+
+    ret = avformat_write_header(ofmt_ctx, &mp4_dict);
     if (ret < 0) {
         fprintf(stderr, "Error occurred when opening output file\n");
         goto end;
@@ -180,9 +184,11 @@ int main(int argc, char **argv)
             if (pkt.pts < pkt.dts)
                 pkt.pts = pkt.dts;
 
+#if 0
             fprintf(stderr,"%lld => %lld at rate %llu/%llu\n",was,pkt.dts,
                 (unsigned long long)out_stream->time_base.num,
                 (unsigned long long)out_stream->time_base.den);
+#endif
 
             ppts = pkt.dts;
         }
