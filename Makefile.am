@@ -3,6 +3,7 @@ ACLOCAL_AMFLAGS = -I m4
 top = $(shell pwd)
 
 bin_PROGRAMS = \
+	normalize_ts \
 	ffmpeg_to_composite \
 	ffmpeg_colorkey \
 	ffmpeg_posterize \
@@ -12,6 +13,10 @@ bin_PROGRAMS = \
 	ffmpeg_ntsc
 
 noinst_PROGRAMS =
+
+normalize_ts_SOURCES = normalize_ts.cpp
+normalize_ts_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
+normalize_ts_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
 
 ffmpeg_to_composite_SOURCES = ffmpeg_to_composite.cpp
 ffmpeg_to_composite_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
