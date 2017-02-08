@@ -241,8 +241,8 @@ double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 //   VHS SP:    100Hz - 10KHz                 (42dBFS S/N)
 //   VHS LP:    100Hz - 7KHz (right??)        (42dBFS S/N)
 //   VHS EP:    100Hz - 4KHz                  (42dBFS S/N)
-bool		emulating_preemphasis = true;		// emulate preemphasis
-bool		emulating_deemphasis = true;		// emulate deemphasis
+bool		emulating_preemphasis = false;		// emulate preemphasis
+bool		emulating_deemphasis = false;		// emulate deemphasis
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -822,12 +822,12 @@ int main(int argc,char **argv) {
 
 	if (emulating_preemphasis) {
         for (unsigned int i=0;i < output_audio_channels;i++) {
-            audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
+            audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,4000/*FIXME: Guess! Also let user set this.*/);
         }
     }
 	if (emulating_deemphasis) {
         for (unsigned int i=0;i < output_audio_channels;i++) {
-            audio_linear_preemphasis_post[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
+            audio_linear_preemphasis_post[i].setFilter(output_audio_rate,4000/*FIXME: Guess! Also let user set this.*/);
         }
     }
 
