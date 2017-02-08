@@ -425,6 +425,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -high <n>                 Highpass frequency\n");
     fprintf(stderr," -headalign <n>            Head misalignment (0 = perfectly aligned)\n");
     fprintf(stderr," -headalignwaver <n>       Head misalignment wavering (0 no waver)\n");
+    fprintf(stderr," -mono                     Mono playback\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -449,6 +450,9 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"mono")) {
+                output_audio_channels = 1;
+            }
             else if (!strcmp(a,"headalign")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
