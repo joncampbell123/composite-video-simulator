@@ -288,10 +288,98 @@ static inline int clips16(const int x) {
 
 static unsigned long long audio_proc_count = 0;
 
+class ConvolutionMap {
+public:
+    ConvolutionMap() : length(0), map(NULL), multiply(NULL) {
+    }
+    ~ConvolutionMap() {
+        freemap();
+    }
+    bool allocmap(const size_t len) {
+        if (map != NULL && len == length)
+            return true;
+
+        freemap();
+        length = len;
+        if (length == 0)
+            return true;
+
+        map = new double[length];
+        memset(map,0,sizeof(double) * length);
+        multiply = new double[length];
+        memset(multiply,0,sizeof(double) * length);
+        return true;
+    }
+public:
+    void freemap(void) {
+        if (map) delete[] map;
+        map = NULL;
+
+        if (multiply) delete[] multiply;
+        multiply = NULL;
+    }
+    double calc(double s) {
+        double r = 0;
+        size_t i;
+
+        for (i=0;(i+1) < length;i++) map[i] = map[i+1];
+        map[i] = s;
+
+        for (i=0;i < length;i++)
+            r += map[i] * multiply[i];
+
+        return r;
+    }
+public:
+    size_t                  length;
+    double*                 map;
+    double*                 multiply;
+};
+
+ConvolutionMap          audio_conv[2];
+double                  lr_delay = 2;               // part of head tilt, as a consequence of storing stereo left + right on separate halves of the tape
+double                  head_tilt = 0.25;           // everyone's a little out of alignment
+double                  head_tilt_waver = 0.75;     // and variation in tape speed changes it over time
+double                  head_tilt_final = 0;
+
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
 
+    if (audio_conv[0].map == NULL) {
+        audio_conv[0].allocmap((int)floor(fabs(head_tilt * 2) + fabs(lr_delay) + 1.5));
+        audio_conv[1].allocmap((int)floor(fabs(head_tilt * 2) + fabs(lr_delay) + 1.5));
+    }
+
 	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
+        {
+            double t = (double)audio_proc_count / output_audio_rate;
+            head_tilt_final = (head_tilt_waver * sin(t * M_PI * 2 * 1.5)) + head_tilt;
+
+            {
+                double mid = fabs(head_tilt_final) + (lr_delay > 0 ?  lr_delay : 0);
+
+                for (size_t i=0;i < audio_conv[0].length;i++) {
+                    double d = ((double)i - mid) / (fabs(head_tilt_final) + 1.0);
+                    d = 1.0 - fabs(d); // FIXME: sinc would be more appropriate?
+                    if (d < 0) d = 0;
+                    d /= fabs(head_tilt_final) + 1.0;
+                    audio_conv[0].multiply[i] = d;
+                }
+            }
+
+            {
+                double mid = fabs(head_tilt_final) + (lr_delay < 0 ? -lr_delay : 0);
+
+                for (size_t i=0;i < audio_conv[1].length;i++) {
+                    double d = ((double)i - mid) / (fabs(head_tilt_final) + 1.0);
+                    d = 1.0 - fabs(d); // FIXME: sinc would be more appropriate?
+                    if (d < 0) d = 0;
+                    d /= fabs(head_tilt_final) + 1.0;
+                    audio_conv[1].multiply[i] = d;
+                }
+            }
+        }
+
 		for (unsigned int c=0;c < output_audio_channels;c++) {
 			double s;
 
@@ -316,6 +404,9 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			/* hiss */
 			if (output_audio_hiss_level != 0)
 				s += ((double)(((int)((unsigned int)rand() % ((output_audio_hiss_level * 2) + 1))) - output_audio_hiss_level)) / 20000;
+
+            /* convolution */
+            s = audio_conv[c].calc(s);
 
 			/* deemphasis */
 			if (emulating_deemphasis) {
@@ -404,8 +495,9 @@ static int parse_argv(int argc,char **argv) {
 	const char *a;
 	int i;
 
-    output_audio_highpass = 50; // highpass to filter out below 50Hz
-    output_audio_lowpass = 16000; // lowpass to filter out above 16KHz
+    // default to modern "good" cassette brands.
+    output_audio_highpass = 20; // highpass to filter out below 20Hz
+    output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
     output_audio_channels = 2;
 
 	for (i=1;i < argc;) {
@@ -815,12 +907,12 @@ int main(int argc,char **argv) {
 
 	if (emulating_preemphasis) {
         for (unsigned int i=0;i < output_audio_channels;i++) {
-            audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,5000/*FIXME: Guess! Also let user set this.*/);
+            audio_linear_preemphasis_pre[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
         }
     }
 	if (emulating_deemphasis) {
         for (unsigned int i=0;i < output_audio_channels;i++) {
-            audio_linear_preemphasis_post[i].setFilter(output_audio_rate,5000/*FIXME: Guess! Also let user set this.*/);
+            audio_linear_preemphasis_post[i].setFilter(output_audio_rate,8000/*FIXME: Guess! Also let user set this.*/);
         }
     }
 
