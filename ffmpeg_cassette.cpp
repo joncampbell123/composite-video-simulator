@@ -486,6 +486,9 @@ static void help(const char *arg0) {
     fprintf(stderr," -comp-phase <n>           NTSC subcarrier phase per scanline (0, 90, 180, or 270)\n");
     fprintf(stderr," -low <n>                  Lowpass frequency\n");
     fprintf(stderr," -high <n>                 Highpass frequency\n");
+    fprintf(stderr," -lrdelay <n>              Stereo L-R delay (head misalignment)\n");
+    fprintf(stderr," -headalign <n>            Head misalignment (0 = perfectly aligned)\n");
+    fprintf(stderr," -headalignwaver <n>       Head misalignment wavering (0 no waver)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -510,6 +513,21 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
+            else if (!strcmp(a,"lrdelay")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                lr_delay = atoi(a);
+            }
+            else if (!strcmp(a,"headalign")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                head_tilt = atoi(a);
+            }
+            else if (!strcmp(a,"headalignwaver")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                head_tilt_waver = atoi(a);
+            }
             else if (!strcmp(a,"low")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
