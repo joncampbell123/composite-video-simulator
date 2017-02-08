@@ -334,15 +334,15 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
 
     if (audio_conv[0].map == NULL) {
-        audio_conv[0].allocmap((int)floor(fabs(head_tilt * 2) + fabs(lr_delay) + 1.5));
-        audio_conv[1].allocmap((int)floor(fabs(head_tilt * 2) + fabs(lr_delay) + 1.5));
+        audio_conv[0].allocmap((int)floor(fabs(head_tilt * 2) + fabs(head_tilt * 2) + 1.5));
+        audio_conv[1].allocmap((int)floor(fabs(head_tilt * 2) + fabs(head_tilt * 2) + 1.5));
     }
 
 	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
         {
             double t = (double)audio_proc_count / output_audio_rate;
             head_tilt_final = (head_tilt_waver * sin(t * M_PI * 2 * 1.5)) + head_tilt;
-            lr_delay = head_tilt_final / 2;
+            lr_delay = head_tilt_final * 1.5;
 
             {
                 double mid = fabs(head_tilt_final) + (lr_delay > 0 ?  lr_delay : 0);
@@ -431,6 +431,7 @@ static void help(const char *arg0) {
     fprintf(stderr," -headalign <n>            Head misalignment (0 = perfectly aligned)\n");
     fprintf(stderr," -headalignwaver <n>       Head misalignment wavering (0 no waver)\n");
     fprintf(stderr," -mono                     Mono playback\n");
+    fprintf(stderr," -preset <x>               Preset to use (0, 1, 2...)\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -510,6 +511,48 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"o")) {
 				output_file = argv[i++];
 			}
+            else if (!strcmp(a,"preset")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+
+                int preset = atoi(a);
+
+                switch (preset) {
+                    case 0: /* old tape, lower grade recording, with some misalignment, somewhat muffled */
+                        output_audio_lowpass = 16000;
+                        output_audio_highpass = 100;
+                        head_tilt_waver = 0.55;
+                        head_tilt = 3.5;
+                        break;
+                    case 1: /* older! (best used with mono) */
+                        output_audio_lowpass = 14000;
+                        output_audio_highpass = 100;
+                        head_tilt_waver = 0.6;
+                        head_tilt = 6;
+                        break;
+                    case 2: /* voice grade crap (best used with mono) */
+                        output_audio_lowpass = 10000;
+                        output_audio_highpass = 100;
+                        head_tilt_waver = 0.5;
+                        head_tilt = 3;
+                        break;
+                    case 3: /* recorded on badly aligned deck */
+                        output_audio_lowpass = 16000;
+                        output_audio_highpass = 20;
+                        head_tilt_waver = 0.75;
+                        head_tilt = 10;
+                        break;
+                    case 4: /* good recording, good deck */
+                        output_audio_lowpass = 16000;
+                        output_audio_highpass = 20;
+                        head_tilt_waver = 0.25;
+                        head_tilt = 1.1;
+                        break;
+                    default:
+                        fprintf(stderr,"Unknown preset\n");
+                        return 1;
+                };
+            }
 			else {
 				fprintf(stderr,"Unknown switch '%s'\n",a);
 				return 1;
