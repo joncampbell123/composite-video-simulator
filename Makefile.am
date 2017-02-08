@@ -10,6 +10,7 @@ bin_PROGRAMS = \
 	ffmpeg_average_delay \
 	ffmpeg_colormap \
 	ffmpeg_scanimate \
+	ffmpeg_cassette \
 	ffmpeg_ntsc
 
 noinst_PROGRAMS =
@@ -21,6 +22,10 @@ normalize_ts_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_L
 ffmpeg_to_composite_SOURCES = ffmpeg_to_composite.cpp
 ffmpeg_to_composite_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
 ffmpeg_to_composite_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
+
+ffmpeg_cassette_SOURCES = ffmpeg_cassette.cpp
+ffmpeg_cassette_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
+ffmpeg_cassette_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
 
 ffmpeg_scanimate_SOURCES = ffmpeg_scanimate.cpp
 ffmpeg_scanimate_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
