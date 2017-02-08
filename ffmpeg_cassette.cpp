@@ -324,8 +324,8 @@ public:
 
 ConvolutionMap          audio_conv[2];
 double                  lr_delay = 2;               // part of head tilt, as a consequence of storing stereo left + right on separate halves of the tape
-double                  head_tilt = 0.25;           // everyone's a little out of alignment
-double                  head_tilt_waver = 0.75;     // and variation in tape speed changes it over time
+double                  head_tilt = 0.2;            // everyone's a little out of alignment
+double                  head_tilt_waver = 0.5;      // and variation in tape speed changes it over time
 double                  head_tilt_final = 0;
 
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
@@ -340,6 +340,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
         {
             double t = (double)audio_proc_count / output_audio_rate;
             head_tilt_final = (head_tilt_waver * sin(t * M_PI * 2 * 1.5)) + head_tilt;
+            lr_delay = head_tilt_final / 2;
 
             {
                 double mid = fabs(head_tilt_final) + (lr_delay > 0 ?  lr_delay : 0);
@@ -422,7 +423,6 @@ static void help(const char *arg0) {
     fprintf(stderr," -t <t>                    Transcode only t seconds\n");
     fprintf(stderr," -low <n>                  Lowpass frequency\n");
     fprintf(stderr," -high <n>                 Highpass frequency\n");
-    fprintf(stderr," -lrdelay <n>              Stereo L-R delay (head misalignment)\n");
     fprintf(stderr," -headalign <n>            Head misalignment (0 = perfectly aligned)\n");
     fprintf(stderr," -headalignwaver <n>       Head misalignment wavering (0 no waver)\n");
 	fprintf(stderr,"\n");
@@ -449,11 +449,6 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
-            else if (!strcmp(a,"lrdelay")) {
-                a = argv[i++];
-                if (a == NULL) return 1;
-                lr_delay = atoi(a);
-            }
             else if (!strcmp(a,"headalign")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
