@@ -231,18 +231,6 @@ double          transcode_start = -1;
 double          transcode_end = -1;
 double          transcode_dur = -1;
 
-double			vhs_out_sharpen = 1.5;
-double			vhs_out_sharpen_chroma = 0.85;
-
-bool            composite_in_chroma_lowpass = true; // apply chroma lowpass before composite encode
-bool            composite_out_chroma_lowpass = true;
-bool            composite_out_chroma_lowpass_lite = true;
-
-int		subcarrier_amplitude = 50;
-int		subcarrier_amplitude_back = 50;
-AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
-bool		output_ntsc = true;	// NTSC color subcarrier emulation
-bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 double		output_audio_hiss_db = -45; // FIXME: guess
@@ -255,8 +243,6 @@ double		output_audio_lowpass = 20000; // lowpass to filter out above 20KHz
 //   VHS EP:    100Hz - 4KHz                  (42dBFS S/N)
 bool		emulating_preemphasis = true;		// emulate preemphasis
 bool		emulating_deemphasis = true;		// emulate deemphasis
-bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
-bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -422,68 +408,18 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 	}
 }
 
-void preset_PAL() {
-	output_field_rate.num = 50;
-	output_field_rate.den = 1;
-	output_pal = true;
-	output_ntsc = false;
-}
-
-void preset_NTSC() {
-	output_field_rate.num = 60000;
-	output_field_rate.den = 1001;
-	output_pal = false;
-	output_ntsc = true;
-}
-
 static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>\n");
 	fprintf(stderr," -o <output file>\n");
-	fprintf(stderr," -tvstd <pal|ntsc>\n");
-	fprintf(stderr," -vhs                      Emulation of VHS artifacts\n");
-	fprintf(stderr," -vhs-hifi <0|1>           (default on)\n");
-	fprintf(stderr," -vhs-speed <ep|lp|sp>     (default sp)\n");
 	fprintf(stderr," -preemphasis <0|1>        Enable preemphasis emulation\n");
 	fprintf(stderr," -deemphasis <0|1>         Enable deepmhasis emulation\n");
-	fprintf(stderr," -nocolor-subcarrier       Emulate color subcarrier but do not decode back (debug)\n");
-	fprintf(stderr," -nocolor-subcarrier-after-yc-sep Emulate Y/C subcarrier separation but do not decode back (debug)\n");
-	fprintf(stderr," -subcarrier-amp <0...100> Subcarrier amplitude (0 to 100 percent of luma)\n");
-	fprintf(stderr," -noise <0..100>           Noise amplitude\n");
-	fprintf(stderr," -chroma-noise <0..100>    Chroma noise amplitude\n");
 	fprintf(stderr," -audio-hiss <-120..0>     Audio hiss in decibels (0=100%)\n");
-	fprintf(stderr," -vhs-linear-video-crosstalk <x> Emulate video crosstalk in audio. Loudness in dBFS (0=100%)\n");
-	fprintf(stderr," -chroma-phase-noise <x>   Chroma phase noise (0...100)\n");
-	fprintf(stderr," -vhs-chroma-vblend <0|1>  Vertically blend chroma scanlines (as VHS format does)\n");
-	fprintf(stderr," -vhs-svideo <0|1>         Render VHS as if S-Video (luma and chroma separate out of VHS)\n");
-	fprintf(stderr," -yc-recomb <n>            Recombine Y/C n-times\n");
 	fprintf(stderr," -a <n>                    Pick the n'th audio stream\n");
 	fprintf(stderr," -an                       Don't render any audio stream\n");
-	fprintf(stderr," -v <n>                    Pick the n'th video stream\n");
-	fprintf(stderr," -vn                       Don't render any video stream\n");
-	fprintf(stderr," -comp-pre <s>             Composite preemphasis scale\n");
-	fprintf(stderr," -comp-cut <f>             Composite preemphasis freq\n");
-	fprintf(stderr," -comp-catv                Composite preemphasis preset, as if CATV #1\n");
-	fprintf(stderr," -comp-catv2               Composite preemphasis preset, as if CATV #2\n");
-	fprintf(stderr," -comp-catv3               Composite preemphasis preset, as if CATV #3\n");
-	fprintf(stderr," -vi                       Render video at frame rate, interlaced\n");
-	fprintf(stderr," -vp                       Render video at field rate, progressive (with bob filter)\n");
-	fprintf(stderr," -chroma-dropout <x>       Chroma scanline dropouts (0...10000)\n");
-	fprintf(stderr," -vhs-linear-high-boost <x> Boost high frequencies in VHS audio (linear tracks)\n");
-	fprintf(stderr," -vhs-head-switching <0|1> Enable/disable VHS head switching emulation\n");
-	fprintf(stderr," -vhs-head-switching-point <x> Head switching point (0....1)\n");
-	fprintf(stderr," -vhs-head-switching-noise-level <x> Head switching noise (variation)\n");
-    fprintf(stderr," -422                      Render in 4:2:2 colorspace\n");
-    fprintf(stderr," -420                      Render in 4:2:0 colorspace (default)\n"); // dammit Premiere >:(
-    fprintf(stderr," -nocomp                   Don't apply emulation, just transcode\n");
     fprintf(stderr," -ss <t>                   Start transcoding from t seconds\n");
     fprintf(stderr," -se <t>                   Stop transcoding at t seconds\n");
     fprintf(stderr," -t <t>                    Transcode only t seconds\n");
-    fprintf(stderr," -in-composite-lowpass <n> Enable/disable chroma lowpass on composite in\n");
-    fprintf(stderr," -out-composite-lowpass <n> Enable/disable chroma lowpass on composite out\n");
-    fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
-    fprintf(stderr," -bkey-feedback <n>        Black key feedback (black level <= N)\n");
-    fprintf(stderr," -comp-phase <n>           NTSC subcarrier phase per scanline (0, 90, 180, or 270)\n");
     fprintf(stderr," -low <n>                  Lowpass frequency\n");
     fprintf(stderr," -high <n>                 Highpass frequency\n");
     fprintf(stderr," -lrdelay <n>              Stereo L-R delay (head misalignment)\n");
@@ -538,15 +474,6 @@ static int parse_argv(int argc,char **argv) {
                 if (a == NULL) return 1;
                 output_audio_highpass = (int)strtoul(a,NULL,0);
             }
-            else if (!strcmp(a,"in-composite-lowpass")) {
-                composite_in_chroma_lowpass = atoi(argv[i++]) > 0;
-            }
-            else if (!strcmp(a,"out-composite-lowpass")) {
-                composite_out_chroma_lowpass = atoi(argv[i++]) > 0;
-            }
-            else if (!strcmp(a,"out-composite-lowpass-lite")) {
-                composite_out_chroma_lowpass_lite = atoi(argv[i++]) > 0;
-            }
             else if (!strcmp(a,"ss")) {
                 transcode_start = atof(argv[i++]);
             }
@@ -565,22 +492,6 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"audio-hiss")) {
 				output_audio_hiss_db = atof(argv[i++]);
 			}
-			else if (!strcmp(a,"noise")) {
-				int x = atoi(argv[i++]);
-			}
-			else if (!strcmp(a,"subcarrier-amp")) {
-				int x = atoi(argv[i++]);
-				subcarrier_amplitude = x;
-				subcarrier_amplitude_back = x;
-			}
-			else if (!strcmp(a,"nocolor-subcarrier")) {
-				nocolor_subcarrier = true;
-			}
-			else if (!strcmp(a,"nocolor-subcarrier-after-yc-sep")) {
-				nocolor_subcarrier_after_yc_sep = true;
-			}
-			else if (!strcmp(a,"chroma-dropout")) {
-			}
 			else if (!strcmp(a,"preemphasis")) {
 				int x = atoi(argv[i++]);
 				emulating_preemphasis = (x > 0);
@@ -594,20 +505,6 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"o")) {
 				output_file = argv[i++];
-			}
-			else if (!strcmp(a,"tvstd")) {
-				a = argv[i++];
-
-				if (!strcmp(a,"pal")) {
-					preset_PAL();
-				}
-				else if (!strcmp(a,"ntsc")) {
-					preset_NTSC();
-				}
-				else {
-					fprintf(stderr,"Unknown tv std '%s'\n",a);
-					return 1;
-				}
 			}
 			else {
 				fprintf(stderr,"Unknown switch '%s'\n",a);
