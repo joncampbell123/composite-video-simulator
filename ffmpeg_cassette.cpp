@@ -227,8 +227,6 @@ AVFormatContext*	output_avfmt = NULL;
 AVStream*		output_avstream_audio = NULL;	// do not free
 AVCodecContext*		output_avstream_audio_codec_context = NULL; // do not free
 
-bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
-
 double          transcode_start = -1;
 double          transcode_end = -1;
 double          transcode_dur = -1;
@@ -243,8 +241,6 @@ bool            composite_out_chroma_lowpass_lite = true;
 int		subcarrier_amplitude = 50;
 int		subcarrier_amplitude_back = 50;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
-int		output_width = 720;
-int		output_height = 480;
 bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
@@ -261,10 +257,6 @@ bool		emulating_preemphasis = true;		// emulate preemphasis
 bool		emulating_deemphasis = true;		// emulate deemphasis
 bool		nocolor_subcarrier = false;		// if set, emulate subcarrier but do not decode back to color (debug)
 bool		nocolor_subcarrier_after_yc_sep = false;// if set, separate luma-chroma but do not decode back to color (debug)
-bool        enable_audio_emulation = true;
-
-/* composite keying emulation */
-int         black_key_level_feedback = -1;           // >= 0 key against black on render
 
 int		output_audio_hiss_level = 0; // out of 10000
 
@@ -342,8 +334,6 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 void preset_PAL() {
 	output_field_rate.num = 50;
 	output_field_rate.den = 1;
-	output_height = 576;
-	output_width = 720;
 	output_pal = true;
 	output_ntsc = false;
 }
@@ -351,8 +341,6 @@ void preset_PAL() {
 void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
-	output_height = 480;
-	output_width = 720;
 	output_pal = false;
 	output_ntsc = true;
 }
@@ -405,6 +393,8 @@ static void help(const char *arg0) {
     fprintf(stderr," -out-composite-lowpass-lite <n> Enable/disable chroma lowpass on composite out (lite)\n");
     fprintf(stderr," -bkey-feedback <n>        Black key feedback (black level <= N)\n");
     fprintf(stderr," -comp-phase <n>           NTSC subcarrier phase per scanline (0, 90, 180, or 270)\n");
+    fprintf(stderr," -low <n>                  Lowpass frequency\n");
+    fprintf(stderr," -high <n>                 Highpass frequency\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr," Output file will be up/down converted to 720x480 (NTSC 29.97fps) or 720x576 (PAL 25fps).\n");
 	fprintf(stderr," Output will be rendered as interlaced video.\n");
@@ -413,6 +403,10 @@ static void help(const char *arg0) {
 static int parse_argv(int argc,char **argv) {
 	const char *a;
 	int i;
+
+    output_audio_highpass = 50; // highpass to filter out below 50Hz
+    output_audio_lowpass = 16000; // lowpass to filter out above 16KHz
+    output_audio_channels = 2;
 
 	for (i=1;i < argc;) {
 		a = argv[i++];
@@ -424,14 +418,15 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
 			}
-            else if (!strcmp(a,"width")) {
+            else if (!strcmp(a,"low")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
-                output_width = (int)strtoul(a,NULL,0);
-                if (output_width < 32) return 1;
+                output_audio_lowpass = (int)strtoul(a,NULL,0);
             }
-            else if (!strcmp(a,"bkey-feedback")) {
-                black_key_level_feedback = atoi(argv[i++]);
+            else if (!strcmp(a,"high")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                output_audio_highpass = (int)strtoul(a,NULL,0);
             }
             else if (!strcmp(a,"in-composite-lowpass")) {
                 composite_in_chroma_lowpass = atoi(argv[i++]) > 0;
@@ -450,15 +445,6 @@ static int parse_argv(int argc,char **argv) {
             }
             else if (!strcmp(a,"t")) {
                 transcode_dur = atof(argv[i++]);
-            }
-            else if (!strcmp(a,"nocomp")) {
-                enable_audio_emulation = false;
-            }
-            else if (!strcmp(a,"422")) {
-                use_422_colorspace = true;
-            }
-            else if (!strcmp(a,"420")) {
-                use_422_colorspace = false;
             }
 			else if (!strcmp(a,"a")) {
 				audio_stream_index = atoi(argv[i++]);
@@ -537,10 +523,6 @@ static int parse_argv(int argc,char **argv) {
 
     fprintf(stderr,"Transcoding from %.2f to %.2f\n",
         transcode_start,transcode_end);
-
-    output_audio_highpass = 50; // highpass to filter out below 50Hz
-    output_audio_lowpass = 16000; // lowpass to filter out above 16KHz
-    output_audio_channels = 2;
 
 	output_audio_hiss_level = dBFS(output_audio_hiss_db) * 5000;
 
@@ -677,8 +659,7 @@ bool do_audio_decode_and_render(AVPacket &pkt,unsigned long long &audio_sample) 
                 if ((out_samples=swr_convert(input_avstream_audio_resampler,audio_dst_data,audio_dst_data_samples,
                                 (const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
                     // PROCESS THE AUDIO. At this point by design the code can assume S16LE (16-bit PCM interleaved)
-                    if (enable_audio_emulation)
-                        composite_audio_process((int16_t*)audio_dst_data[0],out_samples);
+                    composite_audio_process((int16_t*)audio_dst_data[0],out_samples);
                     // write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
                     // that way we can render directly to MP4 our VHS emulation.
                     AVPacket dstpkt;
