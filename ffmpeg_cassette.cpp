@@ -328,6 +328,8 @@ double                  head_tilt = 0.2;            // everyone's a little out o
 double                  head_tilt_waver = 0.5;      // and variation in tape speed changes it over time
 double                  head_tilt_final = 0;
 
+bool                    mono_downmix = false;
+
 void composite_audio_process(int16_t *audio,unsigned int samples) { // number of channels = output_audio_channels, sample rate = output_audio_rate. audio is interleaved.
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
 
@@ -405,6 +407,9 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 			audio[c] = clips16(s * 32768);
 		}
 
+        if (mono_downmix)
+            audio[0] = audio[1] = (audio[0] + audio[1]) / 2;
+
 		audio_proc_count++;
 	}
 }
@@ -451,7 +456,7 @@ static int parse_argv(int argc,char **argv) {
 				return 1;
 			}
             else if (!strcmp(a,"mono")) {
-                output_audio_channels = 1;
+                mono_downmix = 1;
             }
             else if (!strcmp(a,"headalign")) {
                 a = argv[i++];
