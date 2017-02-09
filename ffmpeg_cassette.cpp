@@ -334,8 +334,8 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
 	assert(audio_hilopass.audiostate.size() >= output_audio_channels);
 
     if (audio_conv[0].map == NULL) {
-        audio_conv[0].allocmap((int)floor(fabs(head_tilt * 2) + fabs(head_tilt * 2) + 1.5));
-        audio_conv[1].allocmap((int)floor(fabs(head_tilt * 2) + fabs(head_tilt * 2) + 1.5));
+        audio_conv[0].allocmap((int)floor(fabs(head_tilt * 2) + fabs(head_tilt * 3) + 7.5));
+        audio_conv[1].allocmap((int)floor(fabs(head_tilt * 2) + fabs(head_tilt * 3) + 7.5));
     }
 
 	for (unsigned int s=0;s < samples;s++,audio += output_audio_channels) {
@@ -345,7 +345,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
             lr_delay = head_tilt_final * 1.5;
 
             {
-                double mid = fabs(head_tilt_final) + (lr_delay > 0 ?  lr_delay : 0);
+                double mid = lr_delay + ((double)audio_conv[0].length / 2);
 
                 for (size_t i=0;i < audio_conv[0].length;i++) {
                     double d = ((double)i - mid) / (fabs(head_tilt_final) + 1.0);
@@ -357,7 +357,7 @@ void composite_audio_process(int16_t *audio,unsigned int samples) { // number of
             }
 
             {
-                double mid = fabs(head_tilt_final) + (lr_delay < 0 ? -lr_delay : 0);
+                double mid = -lr_delay + ((double)audio_conv[1].length / 2);
 
                 for (size_t i=0;i < audio_conv[1].length;i++) {
                     double d = ((double)i - mid) / (fabs(head_tilt_final) + 1.0);
