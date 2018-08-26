@@ -624,7 +624,7 @@ int main(int argc,char **argv) {
 		avcodec_get_context_defaults3(output_avstream_video_codec_context,avcodec_find_encoder(AV_CODEC_ID_H264));
 		output_avstream_video_codec_context->width = output_width;
 		output_avstream_video_codec_context->height = output_height;
-		output_avstream_video_codec_context->sample_aspect_ratio = (AVRational){output_height*4, output_width*3};
+		output_avstream_video_codec_context->sample_aspect_ratio = (AVRational){output_ar_n,output_ar_d};
 		output_avstream_video_codec_context->pix_fmt = use_422_colorspace ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV420P;
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
