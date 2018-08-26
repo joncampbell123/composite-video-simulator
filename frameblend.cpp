@@ -42,10 +42,8 @@ using namespace std;
 
 bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
-int		output_width = 720;
-int		output_height = 480;
-bool		output_ntsc = true;	// NTSC color subcarrier emulation
-bool		output_pal = false;	// PAL color subcarrier emulation
+int		output_width = -1;
+int		output_height = -1;
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 
@@ -148,8 +146,8 @@ public:
                 return 1;
             }
             input_avstream_video_frame_rgb->format = AV_PIX_FMT_BGRA;
-            input_avstream_video_frame_rgb->height = output_height;
-            input_avstream_video_frame_rgb->width = output_width;
+            input_avstream_video_frame_rgb->height = input_avstream_video_codec_context->height;
+            input_avstream_video_frame_rgb->width = input_avstream_video_codec_context->width;
             if (av_frame_get_buffer(input_avstream_video_frame_rgb,64) < 0) {
                 fprintf(stderr,"Failed to alloc render frame\n");
                 close_input();
@@ -420,22 +418,9 @@ void sigma(int x) {
 	if (++DIE >= 20) abort();
 }
 
-void preset_PAL() {
-	output_field_rate.num = 50;
-	output_field_rate.den = 1;
-	output_height = 576;
-	output_width = 720;
-	output_pal = true;
-	output_ntsc = false;
-}
-
 void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
-	output_height = 480;
-	output_width = 720;
-	output_pal = false;
-	output_ntsc = true;
 }
 
 static void help(const char *arg0) {
@@ -482,20 +467,6 @@ static int parse_argv(int argc,char **argv) {
             else if (!strcmp(a,"420")) {
                 use_422_colorspace = false;
             }
-			else if (!strcmp(a,"tvstd")) {
-				a = argv[i++];
-
-				if (!strcmp(a,"pal")) {
-					preset_PAL();
-				}
-				else if (!strcmp(a,"ntsc")) {
-					preset_NTSC();
-				}
-				else {
-					fprintf(stderr,"Unknown tv std '%s'\n",a);
-					return 1;
-				}
-			}
 			else {
 				fprintf(stderr,"Unknown switch '%s'\n",a);
 				return 1;
@@ -608,6 +579,22 @@ int main(int argc,char **argv) {
             fprintf(stderr,"Failed to open %s\n",(*i).path.c_str());
             return 1;
         }
+    }
+
+    /* pick output */
+    for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
+        if ((*i).input_avstream_video_codec_context != NULL) {
+            output_width = (*i).input_avstream_video_codec_context->width;
+            output_height = (*i).input_avstream_video_codec_context->height;
+            break;
+        }
+    }
+    fprintf(stderr,"Output frame: %d x %d\n",output_width,output_height);
+
+    /* no decision, no frame */
+    if (output_width < 16 || output_height < 16) {
+        fprintf(stderr,"None or invalid output dimensions\n");
+        return 1;
     }
 
     /* open output file */
