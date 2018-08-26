@@ -524,22 +524,6 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
-void take_colormap(AVFrame *srcframe,InputFile &inputfile) {
-    unsigned int x,y,i;
-    uint32_t *sscan;
-
-    if (srcframe == NULL) return;
-    if (srcframe->data[0] == 0) return;
-    if (srcframe->linesize[0] < (srcframe->width*4)) return; // ARGB
-
-    y = srcframe->height / 2;
-    sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
-    for (i=0;i < 256;i++) {
-        x = (i * srcframe->width) / 256;
-        colormap[i] = sscan[x];
-    }
-}
-
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
     uint32_t *dscan,*sscan;
@@ -557,8 +541,7 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
         sscan = (uint32_t*)(srcframe->data[0] + (srcframe->linesize[0] * y));
         dscan = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
         for (x=0;x < dstframe->width;x++,dscan++,sscan++) {
-            unsigned int g = (*sscan >> 8UL) & 0xFF; // map grayscale from green channel
-            *dscan = colormap[g];
+            *dscan = *sscan;
         }
     }
 }
@@ -786,8 +769,6 @@ int main(int argc,char **argv) {
                     }
                 }
 
-                if (input_files.size() > 1)
-                    take_colormap(input_files[1].input_avstream_video_frame_rgb,input_files[1]);
                 if (input_files.size() > 0)
                     composite_layer(output_avstream_video_frame,input_files[0].input_avstream_video_frame_rgb,input_files[0]);
 
