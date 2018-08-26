@@ -54,8 +54,6 @@ uint32_t                    colormap[256];
 #define RGBTRIPLET(r,g,b)       (((uint32_t)(r) << (uint32_t)16) + ((uint32_t)(g) << (uint32_t)8) + ((uint32_t)(b) << (uint32_t)0))
 
 AVFormatContext*	        output_avfmt = NULL;
-AVStream*		            output_avstream_audio = NULL;	// do not free
-AVCodecContext*		        output_avstream_audio_codec_context = NULL; // do not free
 AVStream*		            output_avstream_video = NULL;	// do not free
 AVCodecContext*		        output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		            output_avstream_video_frame = NULL;         // ARGB
@@ -66,11 +64,6 @@ class InputFile {
 public:
     InputFile() {
         input_avfmt = NULL;
-        audio_dst_data = NULL;
-        input_avstream_audio = NULL;
-        input_avstream_audio_frame = NULL;
-        input_avstream_audio_resampler = NULL;
-        input_avstream_audio_codec_context = NULL;
         input_avstream_video = NULL;
         input_avstream_video_frame = NULL;
         input_avstream_video_frame_rgb = NULL;
@@ -114,24 +107,7 @@ public:
                     isctx = is->codec;
                     if (isctx == NULL) continue;
 
-                    if (isctx->codec_type == AVMEDIA_TYPE_AUDIO) {
-                        if (input_avstream_audio == NULL && ac == 0) {
-                            if (avcodec_open2(isctx,avcodec_find_decoder(isctx->codec_id),NULL) >= 0) {
-                                input_avstream_audio = is;
-                                input_avstream_audio_codec_context = isctx;
-                                fprintf(stderr,"Found audio stream idx=%zu %u-channel %uHz\n",
-                                        i,
-                                        input_avstream_audio_codec_context->channels,
-                                        input_avstream_audio_codec_context->sample_rate);
-                            }
-                            else {
-                                fprintf(stderr,"Found audio stream but not able to decode\n");
-                            }
-                        }
-
-                        ac++;
-                    }
-                    else if (isctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+                    if (isctx->codec_type == AVMEDIA_TYPE_VIDEO) {
                         if (input_avstream_video == NULL && vc == 0) {
                             if (avcodec_open2(isctx,avcodec_find_decoder(isctx->codec_id),NULL) >= 0) {
                                 input_avstream_video = is;
@@ -147,21 +123,11 @@ public:
                     }
                 }
 
-                if (input_avstream_video == NULL && input_avstream_audio == NULL) {
-                    fprintf(stderr,"Neither video nor audio found\n");
+                if (input_avstream_video == NULL) {
+                    fprintf(stderr,"Video not found\n");
                     close_input();
                     return 1;
                 }
-            }
-        }
-
-        /* prepare audio decoding */
-        if (input_avstream_audio != NULL) {
-            input_avstream_audio_frame = av_frame_alloc();
-            if (input_avstream_audio_frame == NULL) {
-                fprintf(stderr,"Failed to alloc audio frame\n");
-                close_input();
-                return 1;
             }
         }
 
@@ -195,18 +161,7 @@ public:
         input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
         input_avstream_video_resampler_height = -1;
         input_avstream_video_resampler_width = -1;
-        last_written_sample = 0;
-        audio_dst_data_out_audio_sample = 0;
-        audio_sample = 0;
-        audio_dst_data = NULL;
-        audio_dst_data_alloc_samples = 0;
-        audio_dst_data_linesize = 0;
-        audio_dst_data_samples = 0;
-        audio_dst_data_out_samples = 0;
-        input_avstream_audio_resampler_channels = -1;
-        input_avstream_audio_resampler_rate = -1;
         eof_stream = false;
-        got_audio = false;
         got_video = false;
         adj_time = 0;
         t = pt = -1;
@@ -264,16 +219,8 @@ public:
                     input_avfmt->streams[avpkt.stream_index]->time_base.num;
             }
 
-            got_audio = false;
             got_video = false;
-			if (input_avstream_audio != NULL && avpkt.stream_index == input_avstream_audio->index) {
-                if (got_audio) fprintf(stderr,"Audio content lost\n");
-				av_packet_rescale_ts(&avpkt,input_avstream_audio->time_base,output_avstream_audio->time_base);
-                handle_audio(/*&*/avpkt);
-                got_audio = true;
-                break;
-			}
-			else if (input_avstream_video != NULL && avpkt.stream_index == input_avstream_video->index) {
+			if (input_avstream_video != NULL && avpkt.stream_index == input_avstream_video->index) {
                 if (got_video) fprintf(stderr,"Video content lost\n");
 				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
 				av_packet_rescale_ts(&avpkt,input_avstream_video->time_base,m); // convert to FIELD number
@@ -294,88 +241,6 @@ public:
         }
 
         return true;
-    }
-    void handle_audio(AVPacket &pkt) {
-        int got_frame = 0;
-
-        if (avcodec_decode_audio4(input_avstream_audio_codec_context,input_avstream_audio_frame,&got_frame,&pkt) >= 0) {
-            if (got_frame != 0 && input_avstream_audio_frame->nb_samples != 0) {
-                if (input_avstream_audio_frame->pts == AV_NOPTS_VALUE)
-                    input_avstream_audio_frame->pts = pkt.pts;
-
-                if (input_avstream_audio_resampler != NULL) {
-                    if (input_avstream_audio_resampler_rate != input_avstream_audio_codec_context->sample_rate ||
-                            input_avstream_audio_resampler_channels != input_avstream_audio_codec_context->channels) {
-                        fprintf(stderr,"Audio format changed\n");
-                        swr_free(&input_avstream_audio_resampler);
-                    }
-                }
-
-                if (input_avstream_audio_resampler == NULL) {
-                    input_avstream_audio_resampler = swr_alloc();
-                    av_opt_set_int(input_avstream_audio_resampler, "in_channel_count", input_avstream_audio_codec_context->channels, 0); // FIXME: FFMPEG should document this!!
-                    av_opt_set_int(input_avstream_audio_resampler, "out_channel_count", output_avstream_audio_codec_context->channels, 0); // FIXME: FFMPEG should document this!!
-                    av_opt_set_int(input_avstream_audio_resampler, "in_channel_layout", input_avstream_audio_codec_context->channel_layout, 0);
-                    av_opt_set_int(input_avstream_audio_resampler, "out_channel_layout", output_avstream_audio_codec_context->channel_layout, 0);
-                    av_opt_set_int(input_avstream_audio_resampler, "in_sample_rate", input_avstream_audio_codec_context->sample_rate, 0);
-                    av_opt_set_int(input_avstream_audio_resampler, "out_sample_rate", output_avstream_audio_codec_context->sample_rate, 0);
-                    av_opt_set_sample_fmt(input_avstream_audio_resampler, "in_sample_fmt", input_avstream_audio_codec_context->sample_fmt, 0);
-                    av_opt_set_sample_fmt(input_avstream_audio_resampler, "out_sample_fmt", output_avstream_audio_codec_context->sample_fmt, 0);
-                    if (swr_init(input_avstream_audio_resampler) < 0) {
-                        fprintf(stderr,"Failed to init audio resampler\n");
-                        swr_free(&input_avstream_audio_resampler);
-                        return;
-                    }
-                    input_avstream_audio_resampler_rate = input_avstream_audio_codec_context->sample_rate;
-                    input_avstream_audio_resampler_channels = input_avstream_audio_codec_context->channels;
-
-                    if (audio_dst_data != NULL) {
-                        av_freep(&audio_dst_data[0]); // NTS: Why??
-                        av_freep(&audio_dst_data);
-                    }
-
-                    audio_dst_data_alloc_samples = 0;
-                    fprintf(stderr,"Audio resampler init %uHz -> %uHz\n",
-                            input_avstream_audio_codec_context->sample_rate,
-                            output_avstream_audio_codec_context->sample_rate);
-                }
-
-                audio_dst_data_samples = av_rescale_rnd(
-                        swr_get_delay(input_avstream_audio_resampler, input_avstream_audio_frame->sample_rate) + input_avstream_audio_frame->nb_samples,
-                        output_avstream_audio_codec_context->sample_rate, input_avstream_audio_frame->sample_rate, AV_ROUND_UP);
-
-                if (audio_dst_data == NULL || audio_dst_data_samples > audio_dst_data_alloc_samples) {
-                    if (audio_dst_data != NULL) {
-                        av_freep(&audio_dst_data[0]); // NTS: Why??
-                        av_freep(&audio_dst_data);
-                    }
-
-                    audio_dst_data_alloc_samples = 0;
-                    fprintf(stderr,"Allocating audio buffer %u samples\n",(unsigned int)audio_dst_data_samples);
-                    if (av_samples_alloc_array_and_samples(&audio_dst_data,&audio_dst_data_linesize,
-                                output_avstream_audio_codec_context->channels,audio_dst_data_samples,
-                                output_avstream_audio_codec_context->sample_fmt, 0) >= 0) {
-                        audio_dst_data_alloc_samples = audio_dst_data_samples;
-                    }
-                    else {
-                        fprintf(stderr,"Failure to allocate audio buffer\n");
-                        audio_dst_data_alloc_samples = 0;
-                    }
-                }
-
-                if (audio_dst_data != NULL) {
-                    if ((audio_dst_data_out_samples=swr_convert(input_avstream_audio_resampler,audio_dst_data,audio_dst_data_samples,
-                                    (const uint8_t**)input_avstream_audio_frame->data,input_avstream_audio_frame->nb_samples)) > 0) {
-                    }
-                    else if (audio_dst_data_out_samples < 0) {
-                        fprintf(stderr,"Failed to resample audio\n");
-                    }
-
-                    audio_dst_data_out_audio_sample = audio_sample;
-                    audio_sample += audio_dst_data_out_samples;
-                }
-            }
-        }
     }
     void frame_copy_scale(void) {
         if (input_avstream_video_frame_rgb == NULL) {
@@ -470,44 +335,27 @@ public:
             avpkt_valid = false;
             av_packet_unref(&avpkt);
         }
-        got_audio = false;
         got_video = false;
     }
     void close_input(void) {
         eof = true;
         avpkt_release();
-        if (input_avstream_audio_codec_context != NULL) {
-            avcodec_close(input_avstream_audio_codec_context);
-            input_avstream_audio_codec_context = NULL;
-            input_avstream_audio = NULL;
-        }
         if (input_avstream_video_codec_context != NULL) {
             avcodec_close(input_avstream_video_codec_context);
             input_avstream_video_codec_context = NULL;
             input_avstream_video = NULL;
         }
 
-        if (input_avstream_audio_frame != NULL)
-            av_frame_free(&input_avstream_audio_frame);
         if (input_avstream_video_frame != NULL)
             av_frame_free(&input_avstream_video_frame);
         if (input_avstream_video_frame_rgb != NULL)
             av_frame_free(&input_avstream_video_frame_rgb);
 
-        if (input_avstream_audio_resampler != NULL)
-            swr_free(&input_avstream_audio_resampler);
         if (input_avstream_video_resampler != NULL) {
             sws_freeContext(input_avstream_video_resampler);
             input_avstream_video_resampler = NULL;
         }
 
-		if (audio_dst_data != NULL) {
-			av_freep(&audio_dst_data[0]); // NTS: Why??
-			av_freep(&audio_dst_data);
-		}
-
-        input_avstream_audio_resampler_channels = -1;
-        input_avstream_audio_resampler_rate = -1;
         avformat_close_input(&input_avfmt);
     }
 public:
@@ -515,28 +363,13 @@ public:
     uint32_t                color;
     bool                    eof;
     bool                    eof_stream;
-    bool                    got_audio;
     bool                    got_video;
 public:
-    unsigned long long      last_written_sample;
-    unsigned long long      audio_sample;
-    uint8_t**               audio_dst_data;
-    int                     audio_dst_data_alloc_samples;
-    int                     audio_dst_data_linesize;
-    int                     audio_dst_data_samples;
-    int                     audio_dst_data_out_samples;
-    unsigned long long      audio_dst_data_out_audio_sample;
-    int                     input_avstream_audio_resampler_rate;
-    int                     input_avstream_audio_resampler_channels;
     AVFormatContext*        input_avfmt;
-    AVStream*               input_avstream_audio;	            // do not free
-    AVCodecContext*         input_avstream_audio_codec_context; // do not free
-    AVFrame*                input_avstream_audio_frame;
     AVStream*               input_avstream_video;	            // do not free
     AVCodecContext*         input_avstream_video_codec_context; // do not free
     AVFrame*		        input_avstream_video_frame;
     AVFrame*		        input_avstream_video_frame_rgb;
-    struct SwrContext*      input_avstream_audio_resampler;
     struct SwsContext*	    input_avstream_video_resampler;
     AVPixelFormat           input_avstream_video_resampler_format;
     int                     input_avstream_video_resampler_height;
@@ -686,63 +519,6 @@ static int parse_argv(int argc,char **argv) {
 	return 0;
 }
 
-void process_audio(InputFile &fin) {
-    if (fin.audio_dst_data == NULL || fin.audio_dst_data_out_samples == 0)
-        return;
-
-    // we don't do anything with audio in this filter
-}
-
-void write_out_audio(InputFile &fin) {
-    if (fin.audio_dst_data == NULL || fin.audio_dst_data_out_samples == 0)
-        return;
-
-    /* pad-fill */
-    while (fin.last_written_sample < fin.audio_dst_data_out_audio_sample) {
-        unsigned long long out_samples = fin.audio_dst_data_out_audio_sample - fin.last_written_sample;
-
-        if (out_samples > output_audio_rate)
-            out_samples = output_audio_rate;
-
-        AVPacket dstpkt;
-        av_init_packet(&dstpkt);
-        if (av_new_packet(&dstpkt,out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
-            assert(dstpkt.data != NULL);
-            assert(dstpkt.size >= (out_samples * 2 * output_audio_channels));
-            memset(dstpkt.data,0,out_samples * 2 * output_audio_channels);
-        }
-        dstpkt.pts = fin.last_written_sample;
-        dstpkt.dts = fin.last_written_sample;
-        dstpkt.stream_index = output_avstream_audio->index;
-        av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
-        if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
-            fprintf(stderr,"Failed to write frame\n");
-        av_packet_unref(&dstpkt);
-
-        fprintf(stderr,"Pad fill %llu samples\n",out_samples);
-        fin.last_written_sample += out_samples;
-    }
-
-    // write it out. TODO: At some point, support conversion to whatever the codec needs and then convert to it.
-    // that way we can render directly to MP4 our VHS emulation.
-    AVPacket dstpkt;
-    av_init_packet(&dstpkt);
-    if (av_new_packet(&dstpkt,fin.audio_dst_data_out_samples * 2 * output_audio_channels) >= 0) { // NTS: Will reset fields too!
-        assert(dstpkt.data != NULL);
-        assert(dstpkt.size >= (fin.audio_dst_data_out_samples * 2 * output_audio_channels));
-        memcpy(dstpkt.data,fin.audio_dst_data[0],fin.audio_dst_data_out_samples * 2 * output_audio_channels);
-    }
-    dstpkt.pts = fin.audio_dst_data_out_audio_sample;
-    dstpkt.dts = fin.audio_dst_data_out_audio_sample;
-    dstpkt.stream_index = output_avstream_audio->index;
-    av_packet_rescale_ts(&dstpkt,output_avstream_audio_codec_context->time_base,output_avstream_audio->time_base);
-    if (av_interleaved_write_frame(output_avfmt,&dstpkt) < 0)
-        fprintf(stderr,"Failed to write frame\n");
-    av_packet_unref(&dstpkt);
-
-    fin.audio_sample = fin.last_written_sample = fin.audio_dst_data_out_audio_sample + fin.audio_dst_data_out_samples;
-}
-
 void output_frame(AVFrame *frame,unsigned long long field_number) {
 	int gotit = 0;
 	AVPacket pkt;
@@ -839,39 +615,6 @@ int main(int argc,char **argv) {
 	if (avformat_alloc_output_context2(&output_avfmt,NULL,NULL,output_file.c_str()) < 0) {
 		fprintf(stderr,"Failed to open output file\n");
 		return 1;
-	}
-
-	{
-		output_avstream_audio = avformat_new_stream(output_avfmt, NULL);
-		if (output_avstream_audio == NULL) {
-			fprintf(stderr,"Unable to create output audio stream\n");
-			return 1;
-		}
-
-		output_avstream_audio_codec_context = output_avstream_audio->codec;
-		if (output_avstream_audio_codec_context == NULL) {
-			fprintf(stderr,"Output stream audio no codec context?\n");
-			return 1;
-		}
-
-		if (output_audio_channels == 2)
-			output_avstream_audio_codec_context->channel_layout = AV_CH_LAYOUT_STEREO;
-		else
-			output_avstream_audio_codec_context->channel_layout = AV_CH_LAYOUT_MONO;
-
-		output_avstream_audio_codec_context->sample_rate = output_audio_rate;
-		output_avstream_audio_codec_context->channels = output_audio_channels;
-		output_avstream_audio_codec_context->sample_fmt = AV_SAMPLE_FMT_S16;
-		output_avstream_audio_codec_context->time_base = (AVRational){1, output_audio_rate};
-		output_avstream_audio->time_base = output_avstream_audio_codec_context->time_base;
-
-		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
-			output_avstream_audio_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-		if (avcodec_open2(output_avstream_audio_codec_context,avcodec_find_encoder(AV_CODEC_ID_PCM_S16LE),NULL) < 0) {
-			fprintf(stderr,"Output stream cannot open codec\n");
-			return 1;
-		}
 	}
 
 	{
@@ -988,18 +731,8 @@ int main(int argc,char **argv) {
             for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                 if ((*i).eof == false) {
                     eof = false;
-                    if (!((*i).got_audio) && !((*i).got_video))
+                    if (!((*i).got_video))
                         (*i).next_packet();
-
-                    if ((*i).got_audio) {
-                        /* we don't do anything with audio, but we do copy through the first input file's audio */
-                        if (!copyaud && i == input_files.begin()) {
-                            copyaud = true;
-                            process_audio((*i)); // NTS: We do chroma/color keying, we don't do anything with audio
-                            write_out_audio((*i));
-                        }
-                        (*i).got_audio = false;
-                    }
                 }
             }
 
