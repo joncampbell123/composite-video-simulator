@@ -612,8 +612,16 @@ double gamma_dec(double x) {
     return pow(x,gamma_correction);
 }
 
+unsigned long gamma_dec16(unsigned long x) {
+    return x;
+}
+
 double gamma_enc(double x) {
     return pow(x,1.0 / gamma_correction);
+}
+
+unsigned long gamma_enc16(unsigned long x) {
+    return x;
 }
 
 int main(int argc,char **argv) {
@@ -864,22 +872,21 @@ int main(int argc,char **argv) {
                     for (unsigned int y=0;y < output_height;y++) {
                         unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
                         for (unsigned int x=0;x < output_width;x++) {
-                            double r = 0,g = 0,b = 0;
+                            unsigned long r = 0,g = 0,b = 0;
 
                             for (size_t wi=0;wi < weight16.size();wi++) {
                                 size_t fi = weights[wi].first;
-                                double weight = weights[wi].second;
                                 assert(fi < frames.size());
                                 unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
 
-                                b += gamma_dec(inframe[0] / 255.0) * weight;
-                                g += gamma_dec(inframe[1] / 255.0) * weight;
-                                r += gamma_dec(inframe[2] / 255.0) * weight;
+                                b += gamma_dec16(inframe[0]) * (unsigned long)weight16[wi];
+                                g += gamma_dec16(inframe[1]) * (unsigned long)weight16[wi];
+                                r += gamma_dec16(inframe[2]) * (unsigned long)weight16[wi];
                             }
 
-                            outframe[0] = clamp255(gamma_enc(b) * 0xFF);
-                            outframe[1] = clamp255(gamma_enc(g) * 0xFF);
-                            outframe[2] = clamp255(gamma_enc(r) * 0xFF);
+                            outframe[0] = gamma_enc16(b) >> 16u;
+                            outframe[1] = gamma_enc16(g) >> 16u;
+                            outframe[2] = gamma_enc16(r) >> 16u;
                             outframe[3] = 0xFF;
 
                             outframe += 4;
