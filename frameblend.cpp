@@ -796,6 +796,12 @@ int main(int argc,char **argv) {
                         double bt = frame_t[i];
                         double et = frame_t[i+1];
 
+                        if (i != 0) {
+                            if ((et + 2.0) < current) {
+                                cutoff = i;
+                            }
+                        }
+
                         if (bt < current)
                             bt = current;
                         if (bt > (current + 1ll))
@@ -816,7 +822,7 @@ int main(int argc,char **argv) {
                     weights.push_back(pair<size_t,double>(0,1.0));
                 }
 
-                fprintf(stderr,"weights: ");
+                fprintf(stderr,"cutoff=%zu weights: ",cutoff);
                 for (size_t i=0;i < weights.size();i++) fprintf(stderr,"{w=%.3f, i=%zu} ",weights[i].second,weights[i].first);
                 fprintf(stderr,"\n");
 
