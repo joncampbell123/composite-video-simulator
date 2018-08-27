@@ -828,7 +828,9 @@ int main(int argc,char **argv) {
             }
 
             while (!input_file.eof && !DIE) {
+#if 0
                 fprintf(stderr,"current %lld\n",current);
+#endif
 
                 while (input_file.video_frame_to_output_f() < (current + 30LL)) {
                     input_file.next_packet();
