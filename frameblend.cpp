@@ -77,6 +77,20 @@ public:
         close_input();
     }
 public:
+    signed long long video_frame_to_output(void) {
+        if (input_avstream_video_frame != NULL) {
+            if (input_avstream_video_frame->pkt_pts != AV_NOPTS_VALUE) {
+                signed long long n = (signed long long)input_avstream_video_frame->pkt_pts;
+
+                n *= (signed long long)input_avstream_video->time_base.num * (signed long long)output_field_rate.num;
+                n /= (signed long long)input_avstream_video->time_base.den * (signed long long)output_field_rate.den;
+
+                return n;
+            }
+        }
+
+        return AV_NOPTS_VALUE;
+    }
     void reset_on_dup(void) {
         path.clear();
     }
@@ -221,8 +235,8 @@ public:
             got_video = false;
 			if (input_avstream_video != NULL && avpkt.stream_index == input_avstream_video->index) {
                 if (got_video) fprintf(stderr,"Video content lost\n");
-				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
-				av_packet_rescale_ts(&avpkt,input_avstream_video->time_base,m); // convert to FIELD number
+//				AVRational m = (AVRational){output_field_rate.den, output_field_rate.num};
+//				av_packet_rescale_ts(&avpkt,input_avstream_video->time_base,m); // convert to FIELD number
                 handle_frame(/*&*/avpkt); // will set got_video
                 break;
 			}
@@ -714,12 +728,14 @@ int main(int argc,char **argv) {
                 if ((*i).eof == false) {
                     if ((*i).input_avstream_video_frame != NULL) {
                         if ((*i).got_video) {
-                            if ((*i).input_avstream_video_frame->pkt_pts != AV_NOPTS_VALUE) {
-                                if (upto == (-1LL) || upto > (*i).input_avstream_video_frame->pkt_pts)
-                                    upto = (*i).input_avstream_video_frame->pkt_pts;
+                            signed long long cnv_frame = (*i).video_frame_to_output();
+
+                            if (cnv_frame != AV_NOPTS_VALUE) {
+                                if (upto == (-1LL) || upto > cnv_frame)
+                                    upto = cnv_frame;
                             }
 
-                            if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
+                            if (cnv_frame == AV_NOPTS_VALUE || current >= cnv_frame) {
                                 (*i).frame_copy_scale();
                                 (*i).got_video = false;
                             }
@@ -746,8 +762,10 @@ int main(int argc,char **argv) {
                 for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
                     if ((*i).eof == false) {
                         if ((*i).input_avstream_video_frame != NULL) {
+                            signed long long cnv_frame = (*i).video_frame_to_output();
+ 
                             if ((*i).got_video) {
-                                if ((*i).input_avstream_video_frame->pkt_pts == AV_NOPTS_VALUE || current >= (*i).input_avstream_video_frame->pkt_pts) {
+                                if (cnv_frame == AV_NOPTS_VALUE || current >= cnv_frame) {
                                     (*i).frame_copy_scale();
                                     (*i).got_video = false;
                                 }
