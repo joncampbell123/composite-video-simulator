@@ -851,7 +851,31 @@ int main(int argc,char **argv) {
 
                 output_frame(output_avstream_video_encode_frame,current);
                 current++;
+
+                if (cutoff >= 32) {
+                    assert(frame_t.size() > cutoff);
+                    assert(frames.size() > cutoff);
+
+                    for (size_t i=0;i < cutoff;i++) {
+                        if (frames[i] != NULL) {
+                            delete[] frames[i];
+                            frames[i] = NULL;
+                        }
+                    }
+
+                    frame_t.erase(frame_t.begin(),frame_t.begin()+cutoff);
+                    frames.erase(frames.begin(),frames.begin()+cutoff);
+                }
             }
+
+            for (size_t i=0;i < frames.size();i++) {
+                if (frames[i] != NULL) {
+                    delete[] frames[i];
+                    frames[i] = NULL;
+                }
+            }
+            frames.clear();
+            frame_t.clear();
 
             outbase += current;
         }
