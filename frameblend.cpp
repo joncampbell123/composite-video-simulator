@@ -77,10 +77,24 @@ public:
         close_input();
     }
 public:
-    signed long long video_frame_to_output(void) {
+    double video_frame_to_output_f(void) {
         if (input_avstream_video_frame != NULL) {
             if (input_avstream_video_frame->pkt_pts != AV_NOPTS_VALUE) {
-                signed long long n = (signed long long)input_avstream_video_frame->pkt_pts;
+                double n = input_avstream_video_frame->pkt_pts;
+
+                n *= (signed long long)input_avstream_video->time_base.num * (signed long long)output_field_rate.num;
+                n /= (signed long long)input_avstream_video->time_base.den * (signed long long)output_field_rate.den;
+
+                return n;
+            }
+        }
+
+        return AV_NOPTS_VALUE;
+    }
+    double video_frame_rgb_to_output_f(void) {
+        if (input_avstream_video_frame_rgb != NULL) {
+            if (input_avstream_video_frame_rgb->pkt_pts != AV_NOPTS_VALUE) {
+                double n = input_avstream_video_frame_rgb->pkt_pts;
 
                 n *= (signed long long)input_avstream_video->time_base.num * (signed long long)output_field_rate.num;
                 n /= (signed long long)input_avstream_video->time_base.den * (signed long long)output_field_rate.den;
@@ -183,6 +197,21 @@ public:
         next_pts = next_dts = -1LL;
         return (input_avfmt != NULL);
     }
+
+    uint32_t *copy_rgba(const AVFrame * const src) {
+        assert(src != NULL);
+        assert(src->data[0] != NULL);
+        assert(src->linesize[0] != 0);
+        assert(src->height != 0);
+
+        assert(src->linesize[0] >= (src->width * 4));
+
+        uint32_t *r = (uint32_t*)(new uint8_t[src->linesize[0] * src->height]);
+        memcpy(r,src->data[0],src->linesize[0] * src->height);
+
+        return r;
+    }
+
     bool next_packet(void) {
         if (eof) return false;
         if (input_avfmt == NULL) return false;
@@ -706,10 +735,87 @@ int main(int argc,char **argv) {
 
     /* run all inputs and render to output, until done */
     {
-        bool eof,copyaud;
-        signed long long upto=0;
-        signed long long current=0;
+        signed long long outbase=0;
 
+        memset(output_avstream_video_frame->data[0],0x00,output_avstream_video_frame->linesize[0] * output_avstream_video_frame->height);
+
+        for (std::vector<InputFile>::iterator ifi=input_files.begin();ifi!=input_files.end();ifi++) {
+            signed long long current=0;
+
+            if (DIE) break;
+
+            InputFile &input_file = *ifi;
+
+            while (!input_file.eof && !DIE) {
+                if (!input_file.got_video)
+                    input_file.next_packet();
+                else
+                    break;
+            }
+
+            if (input_file.input_avstream_video_frame != NULL && input_file.got_video) {
+                input_file.frame_copy_scale();
+                input_file.got_video = false;
+            }
+
+            std::vector<uint32_t*> frames; /* they're all the same RGBA frame, so just store a pointer */
+            std::vector<double> frame_t;
+
+            if (input_file.input_avstream_video_frame_rgb != NULL) {
+                frame_t.push_back(input_file.video_frame_rgb_to_output_f());
+                frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
+            }
+
+            while (!input_file.eof && !DIE) {
+                fprintf(stderr,"current %lld\n",current);
+
+                while (input_file.video_frame_to_output_f() < (current + 30LL)) {
+                    input_file.next_packet();
+
+                    if (input_file.input_avstream_video_frame != NULL && input_file.got_video) {
+                        input_file.frame_copy_scale();
+                        input_file.got_video = false;
+
+                        if (input_file.input_avstream_video_frame_rgb != NULL) {
+                            frame_t.push_back(input_file.video_frame_rgb_to_output_f());
+                            frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
+
+                            fprintf(stderr,"got %.3f\n",input_file.video_frame_rgb_to_output_f());
+                        }
+                    }
+                }
+
+                output_avstream_video_frame->pts = current;
+                output_avstream_video_frame->pkt_pts = current;
+                output_avstream_video_frame->pkt_dts = current;
+                output_avstream_video_frame->top_field_first = 0;
+                output_avstream_video_frame->interlaced_frame = 0;
+
+                // convert ARGB to whatever the codec demands, and encode
+                output_avstream_video_encode_frame->pts = output_avstream_video_frame->pts;
+                output_avstream_video_encode_frame->pkt_pts = output_avstream_video_frame->pkt_pts;
+                output_avstream_video_encode_frame->pkt_dts = output_avstream_video_frame->pkt_dts;
+                output_avstream_video_encode_frame->top_field_first = output_avstream_video_frame->top_field_first;
+                output_avstream_video_encode_frame->interlaced_frame = output_avstream_video_frame->interlaced_frame;
+
+                if (sws_scale(output_avstream_video_resampler,
+                            // source
+                            output_avstream_video_frame->data,
+                            output_avstream_video_frame->linesize,
+                            0,output_avstream_video_frame->height,
+                            // dest
+                            output_avstream_video_encode_frame->data,
+                            output_avstream_video_encode_frame->linesize) <= 0)
+                    fprintf(stderr,"WARNING: sws_scale failed\n");
+
+                output_frame(output_avstream_video_encode_frame,current);
+                current++;
+            }
+
+            outbase += current;
+        }
+
+#if 0
         do {
             if (DIE) break;
 
@@ -811,6 +917,7 @@ int main(int argc,char **argv) {
                 current++;
             }
         } while (!eof);
+#endif
     }
 
     /* flush encoder delay */
