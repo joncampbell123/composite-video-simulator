@@ -48,7 +48,7 @@ bool            use_422_colorspace = false; // I would default this to true but 
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = -1;
 int		output_height = -1;
-int     output_ar_n = 4,output_ar_d = 3;
+int     output_ar_n = 1,output_ar_d = 1;
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 
