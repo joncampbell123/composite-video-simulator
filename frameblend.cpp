@@ -40,6 +40,8 @@ using namespace std;
 #include <vector>
 #include <stdexcept>
 
+double          gamma_correction = -1;
+
 bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = -1;
@@ -589,6 +591,22 @@ void composite_layer(AVFrame *dstframe,AVFrame *srcframe,InputFile &inputfile) {
     }
 }
 
+int clamp255(int x) {
+    if (x > 255)
+        return 255;
+    if (x < 0)
+        return 0;
+    return x;
+}
+
+double gamma_dec(double x) {
+    return pow(x,gamma_correction);
+}
+
+double gamma_enc(double x) {
+    return pow(x,1.0 / gamma_correction);
+}
+
 int main(int argc,char **argv) {
     preset_NTSC();
     if (parse_argv(argc,argv))
@@ -833,27 +851,55 @@ int main(int argc,char **argv) {
 
                 assert(weights.size() == weight16.size());
 
-                for (unsigned int y=0;y < output_height;y++) {
-                    unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
-                    for (unsigned int x=0;x < output_width;x++) {
-                        unsigned int r = 0,g = 0,b = 0;
+                if (gamma_correction > 1) {
+                    for (unsigned int y=0;y < output_height;y++) {
+                        unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+                        for (unsigned int x=0;x < output_width;x++) {
+                            double r = 0,g = 0,b = 0;
 
-                        for (size_t wi=0;wi < weight16.size();wi++) {
-                            size_t fi = weights[wi].first;
-                            assert(fi < frames.size());
-                            unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
+                            for (size_t wi=0;wi < weight16.size();wi++) {
+                                size_t fi = weights[wi].first;
+                                double weight = weights[wi].second;
+                                assert(fi < frames.size());
+                                unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
 
-                            b += inframe[0] * weight16[wi];
-                            g += inframe[1] * weight16[wi];
-                            r += inframe[2] * weight16[wi];
+                                b += gamma_dec(inframe[0] / 255.0) * weight;
+                                g += gamma_dec(inframe[1] / 255.0) * weight;
+                                r += gamma_dec(inframe[2] / 255.0) * weight;
+                            }
+
+                            outframe[0] = clamp255(gamma_enc(b) * 0xFF);
+                            outframe[1] = clamp255(gamma_enc(g) * 0xFF);
+                            outframe[2] = clamp255(gamma_enc(r) * 0xFF);
+                            outframe[3] = 0xFF;
+
+                            outframe += 4;
                         }
+                    }
+                }
+                else {
+                    for (unsigned int y=0;y < output_height;y++) {
+                        unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+                        for (unsigned int x=0;x < output_width;x++) {
+                            unsigned int r = 0,g = 0,b = 0;
 
-                        outframe[0] = b >> 16u;
-                        outframe[1] = g >> 16u;
-                        outframe[2] = r >> 16u;
-                        outframe[3] = 0xFF;
+                            for (size_t wi=0;wi < weight16.size();wi++) {
+                                size_t fi = weights[wi].first;
+                                assert(fi < frames.size());
+                                unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
 
-                        outframe += 4;
+                                b += inframe[0] * weight16[wi];
+                                g += inframe[1] * weight16[wi];
+                                r += inframe[2] * weight16[wi];
+                            }
+
+                            outframe[0] = b >> 16u;
+                            outframe[1] = g >> 16u;
+                            outframe[2] = r >> 16u;
+                            outframe[3] = 0xFF;
+
+                            outframe += 4;
+                        }
                     }
                 }
 
