@@ -840,8 +840,9 @@ int main(int argc,char **argv) {
                         if (input_file.input_avstream_video_frame_rgb != NULL) {
                             frame_t.push_back(input_file.video_frame_rgb_to_output_f());
                             frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
-
+#if 0
                             fprintf(stderr,"got %.3f\n",input_file.video_frame_rgb_to_output_f());
+#endif
                         }
                     }
                 }
@@ -883,9 +884,11 @@ int main(int argc,char **argv) {
                 if (weights.size() == 0 && frames.size() > cutoff)
                     weights.push_back(pair<size_t,double>(cutoff,1.0));
 
+#if 0
                 fprintf(stderr,"cutoff=%zu weights: ",cutoff);
                 for (size_t i=0;i < weights.size();i++) fprintf(stderr,"{w=%.3f, i=%zu} ",weights[i].second,weights[i].first);
                 fprintf(stderr,"\n");
+#endif
 
                 std::vector<unsigned int> weight16;
 
