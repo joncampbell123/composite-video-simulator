@@ -645,7 +645,7 @@ void gamma16_do_init(void) {
     for (unsigned int i=0;i < 256;i++)
         gamma_dec16_table[i] = (unsigned long)(gamma_dec(i / 255.0) * 8192);
 
-    for (unsigned int i=0;i < 8192;i++)
+    for (unsigned int i=0;i <= 8192;i++)
         gamma_enc16_table[i] = (unsigned long)(gamma_enc(i / 8192.0) * 255);
 }
 
@@ -714,6 +714,7 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->pix_fmt = use_422_colorspace ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV420P;
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
+		output_avstream_video_codec_context->bit_rate = 15000000;
 		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num};
 
 		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
@@ -897,21 +898,21 @@ int main(int argc,char **argv) {
                     for (unsigned int y=0;y < output_height;y++) {
                         unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
                         for (unsigned int x=0;x < output_width;x++) {
-                            unsigned long r = 0,g = 0,b = 0;
+                            unsigned long long r = 0,g = 0,b = 0;
 
                             for (size_t wi=0;wi < weight16.size();wi++) {
                                 size_t fi = weights[wi].first;
                                 assert(fi < frames.size());
                                 unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
 
-                                b += gamma_dec16(inframe[0]) * (unsigned long)weight16[wi];
-                                g += gamma_dec16(inframe[1]) * (unsigned long)weight16[wi];
-                                r += gamma_dec16(inframe[2]) * (unsigned long)weight16[wi];
+                                b += gamma_dec16(inframe[0]) * (unsigned long long)weight16[wi];
+                                g += gamma_dec16(inframe[1]) * (unsigned long long)weight16[wi];
+                                r += gamma_dec16(inframe[2]) * (unsigned long long)weight16[wi];
                             }
 
-                            outframe[0] = gamma_enc16(b >> 16ul);
-                            outframe[1] = gamma_enc16(g >> 16ul);
-                            outframe[2] = gamma_enc16(r >> 16ul);
+                            outframe[0] = clamp255(gamma_enc16(b >> 16ull));
+                            outframe[1] = clamp255(gamma_enc16(g >> 16ull));
+                            outframe[2] = clamp255(gamma_enc16(r >> 16ull));
                             outframe[3] = 0xFF;
 
                             outframe += 4;
@@ -922,21 +923,21 @@ int main(int argc,char **argv) {
                     for (unsigned int y=0;y < output_height;y++) {
                         unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
                         for (unsigned int x=0;x < output_width;x++) {
-                            unsigned int r = 0,g = 0,b = 0;
+                            unsigned long r = 0,g = 0,b = 0;
 
                             for (size_t wi=0;wi < weight16.size();wi++) {
                                 size_t fi = weights[wi].first;
                                 assert(fi < frames.size());
                                 unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
 
-                                b += inframe[0] * weight16[wi];
-                                g += inframe[1] * weight16[wi];
-                                r += inframe[2] * weight16[wi];
+                                b += inframe[0] * (unsigned long)weight16[wi];
+                                g += inframe[1] * (unsigned long)weight16[wi];
+                                r += inframe[2] * (unsigned long)weight16[wi];
                             }
 
-                            outframe[0] = b >> 16u;
-                            outframe[1] = g >> 16u;
-                            outframe[2] = r >> 16u;
+                            outframe[0] = clamp255(b >> 16ul);
+                            outframe[1] = clamp255(g >> 16ul);
+                            outframe[2] = clamp255(r >> 16ul);
                             outframe[3] = 0xFF;
 
                             outframe += 4;
