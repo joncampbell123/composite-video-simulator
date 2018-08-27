@@ -827,12 +827,12 @@ int main(int argc,char **argv) {
                 frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
             }
 
-            while (!input_file.eof && !DIE) {
+            while (!DIE) {
 #if 0
                 fprintf(stderr,"current %lld\n",current);
 #endif
 
-                while (input_file.video_frame_to_output_f() < (current + 30LL)) {
+                while (!input_file.eof && !DIE && input_file.video_frame_to_output_f() < (current + 30LL)) {
                     input_file.next_packet();
 
                     if (input_file.input_avstream_video_frame != NULL && input_file.got_video) {
@@ -881,6 +881,10 @@ int main(int argc,char **argv) {
                         if (bt < et)
                             weights.push_back(pair<size_t,double>(i,et-bt));
                     }
+                }
+                else {
+                    if (input_file.eof)
+                        break;
                 }
 
                 if (weights.size() == 0 && frames.size() > cutoff)
