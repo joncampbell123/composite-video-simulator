@@ -785,6 +785,41 @@ int main(int argc,char **argv) {
                     }
                 }
 
+                /* cross-blending weights for this frame period */
+                std::vector< pair<size_t,double> > weights;
+                assert(frames.size() == frame_t.size());
+                size_t cutoff = 0;
+
+                /* scan for first frame to render */
+                if (frames.size() > 1) {
+                    for (size_t i=0;(i+1ul) < frames.size();i++) {
+                        double bt = frame_t[i];
+                        double et = frame_t[i+1];
+
+                        if (bt < current)
+                            bt = current;
+                        if (bt > (current + 1ll))
+                            bt = (current + 1ll);
+
+                        if (et < current)
+                            et = current;
+                        if (et > (current + 1ll))
+                            et = (current + 1ll);
+
+                        assert(bt <= et);
+
+                        if (bt < et)
+                            weights.push_back(pair<size_t,double>(i,et-bt));
+                    }
+                }
+                else if (frames.size() == 0) {
+                    weights.push_back(pair<size_t,double>(0,1.0));
+                }
+
+                fprintf(stderr,"weights: ");
+                for (size_t i=0;i < weights.size();i++) fprintf(stderr,"{w=%.3f, i=%zu} ",weights[i].second,weights[i].first);
+                fprintf(stderr,"\n");
+
                 output_avstream_video_frame->pts = current;
                 output_avstream_video_frame->pkt_pts = current;
                 output_avstream_video_frame->pkt_dts = current;
