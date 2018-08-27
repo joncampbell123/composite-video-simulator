@@ -42,6 +42,8 @@ using namespace std;
 
 double          gamma_correction = -1;
 
+int             underscan = 0;
+
 bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = -1;
@@ -315,14 +317,22 @@ public:
         }
 
         if (input_avstream_video_resampler == NULL) {
+            int final_w,final_h;
+
+            final_w = (input_avstream_video_frame_rgb->width * (100 - underscan)) / 100;
+            final_h = (input_avstream_video_frame_rgb->height * (100 - underscan)) / 100;
+
+            if (final_w < 1) final_w = 1;
+            if (final_h < 1) final_h = 1;
+
             input_avstream_video_resampler = sws_getContext(
                     // source
                     input_avstream_video_frame->width,
                     input_avstream_video_frame->height,
                     (AVPixelFormat)input_avstream_video_frame->format,
                     // dest
-                    input_avstream_video_frame_rgb->width,
-                    input_avstream_video_frame_rgb->height,
+                    final_w,// input_avstream_video_frame_rgb->width,
+                    final_h,// input_avstream_video_frame_rgb->height,
                     (AVPixelFormat)input_avstream_video_frame_rgb->format,
                     // opt
                     SWS_BILINEAR, NULL, NULL, NULL);
@@ -332,6 +342,11 @@ public:
                 input_avstream_video_resampler_format = (AVPixelFormat)input_avstream_video_frame->format;
                 input_avstream_video_resampler_width = input_avstream_video_frame->width;
                 input_avstream_video_resampler_height = input_avstream_video_frame->height;
+                input_avstream_video_resampler_x = (input_avstream_video_frame_rgb->width - final_w) / 2;
+                input_avstream_video_resampler_y = (input_avstream_video_frame_rgb->height - final_h) / 2;
+                assert(input_avstream_video_resampler_x >= 0);
+                assert(input_avstream_video_resampler_y >= 0);
+//              fprintf(stderr,"ofs %d, %d\n",input_avstream_video_resampler_x,input_avstream_video_resampler_y);
             }
             else {
                 fprintf(stderr,"sws_getContext fail\n");
@@ -345,13 +360,19 @@ public:
             input_avstream_video_frame_rgb->top_field_first = input_avstream_video_frame->top_field_first;
             input_avstream_video_frame_rgb->interlaced_frame = input_avstream_video_frame->interlaced_frame;
 
+            unsigned char *dst_planes[8] = {NULL};
+
+            dst_planes[0]  = input_avstream_video_frame_rgb->data[0];
+            dst_planes[0] += input_avstream_video_resampler_y * input_avstream_video_frame_rgb->linesize[0];
+            dst_planes[0] += input_avstream_video_resampler_x * 4;
+
             if (sws_scale(input_avstream_video_resampler,
                         // source
                         input_avstream_video_frame->data,
                         input_avstream_video_frame->linesize,
                         0,input_avstream_video_frame->height,
                         // dest
-                        input_avstream_video_frame_rgb->data,
+                        dst_planes,//input_avstream_video_frame_rgb->data,
                         input_avstream_video_frame_rgb->linesize) <= 0)
                 fprintf(stderr,"WARNING: sws_scale failed\n");
         }
@@ -418,6 +439,8 @@ public:
     AVPixelFormat           input_avstream_video_resampler_format;
     int                     input_avstream_video_resampler_height;
     int                     input_avstream_video_resampler_width;
+    int                     input_avstream_video_resampler_y;
+    int                     input_avstream_video_resampler_x;
     signed long long        next_pts;
     signed long long        next_dts;
     AVPacket                avpkt;
@@ -497,6 +520,12 @@ static int parse_argv(int argc,char **argv) {
                 output_width = (int)strtoul(a,NULL,0);
                 if (output_width < 32) return 1;
             }
+            else if (!strcmp(a,"height")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                output_height = (int)strtoul(a,NULL,0);
+                if (output_height < 32) return 1;
+            }
             else if (!strcmp(a,"gamma")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
@@ -515,6 +544,13 @@ static int parse_argv(int argc,char **argv) {
                 a = argv[i++];
                 if (a == NULL) return 1;
                 output_file = a;
+            }
+            else if (!strcmp(a,"underscan")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                underscan = atoi(a);
+                if (underscan < 0) underscan = 0;
+                if (underscan > 99) underscan = 99;
             }
             else if (!strcmp(a,"422")) {
                 use_422_colorspace = true;
@@ -669,13 +705,15 @@ int main(int argc,char **argv) {
     }
 
     /* pick output */
-    for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
-        if ((*i).input_avstream_video_codec_context != NULL) {
-            output_width = (*i).input_avstream_video_codec_context->width;
-            output_height = (*i).input_avstream_video_codec_context->height;
-            output_ar_n = (*i).input_avstream_video_codec_context->sample_aspect_ratio.num;
-            output_ar_d = (*i).input_avstream_video_codec_context->sample_aspect_ratio.den;
-            break;
+    if (output_width < 1 || output_height < 1) {
+        for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
+            if ((*i).input_avstream_video_codec_context != NULL) {
+                output_width = (*i).input_avstream_video_codec_context->width;
+                output_height = (*i).input_avstream_video_codec_context->height;
+                output_ar_n = (*i).input_avstream_video_codec_context->sample_aspect_ratio.num;
+                output_ar_d = (*i).input_avstream_video_codec_context->sample_aspect_ratio.den;
+                break;
+            }
         }
     }
     fprintf(stderr,"Output frame: %d x %d with %d:%d PAR\n",output_width,output_height,output_ar_n,output_ar_d);
