@@ -818,9 +818,9 @@ int main(int argc,char **argv) {
                             weights.push_back(pair<size_t,double>(i,et-bt));
                     }
                 }
-                else if (frames.size() == 0) {
-                    weights.push_back(pair<size_t,double>(0,1.0));
-                }
+
+                if (weights.size() == 0 && frames.size() > cutoff)
+                    weights.push_back(pair<size_t,double>(cutoff,1.0));
 
                 fprintf(stderr,"cutoff=%zu weights: ",cutoff);
                 for (size_t i=0;i < weights.size();i++) fprintf(stderr,"{w=%.3f, i=%zu} ",weights[i].second,weights[i].first);
