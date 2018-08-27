@@ -497,6 +497,15 @@ static int parse_argv(int argc,char **argv) {
                 output_width = (int)strtoul(a,NULL,0);
                 if (output_width < 32) return 1;
             }
+            else if (!strcmp(a,"gamma")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+
+                if (isdigit(*a))
+                    gamma_correction = atof(a);
+                else if (!strcmp(a,"vga") || !strcmp(a,"ntsc"))
+                    gamma_correction = 2.2;
+            }
             else if (!strcmp(a,"i")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
