@@ -849,6 +849,18 @@ int main(int argc,char **argv) {
                     }
                 }
 
+#if 0
+                fprintf(stderr,"eof=%u current=%lld max=%.3f\n",
+                    input_file.eof,
+                    current,
+                    input_file.video_frame_to_output_f());
+#endif
+
+                if (input_file.eof &&
+                    (input_file.video_frame_to_output_f() < -1000/*AV_NOPTS_VALUE*/ ||
+                     current > (unsigned long long)ceil(input_file.video_frame_to_output_f())))
+                    break;
+
                 /* cross-blending weights for this frame period */
                 std::vector< pair<size_t,double> > weights;
                 assert(frames.size() == frame_t.size());
@@ -881,10 +893,6 @@ int main(int argc,char **argv) {
                         if (bt < et)
                             weights.push_back(pair<size_t,double>(i,et-bt));
                     }
-                }
-                else {
-                    if (input_file.eof)
-                        break;
                 }
 
                 if (weights.size() == 0 && frames.size() > cutoff)
