@@ -826,6 +826,13 @@ int main(int argc,char **argv) {
                 for (size_t i=0;i < weights.size();i++) fprintf(stderr,"{w=%.3f, i=%zu} ",weights[i].second,weights[i].first);
                 fprintf(stderr,"\n");
 
+                std::vector<unsigned int> weight16;
+
+                for (size_t i=0;i < weights.size();i++)
+                    weight16.push_back((unsigned int)floor((weights[i].second * 0x10000)+0.5));
+
+                assert(weights.size() == weight16.size());
+
                 output_avstream_video_frame->pts = current;
                 output_avstream_video_frame->pkt_pts = current;
                 output_avstream_video_frame->pkt_dts = current;
