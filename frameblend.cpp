@@ -612,8 +612,19 @@ double gamma_dec(double x) {
     return pow(x,gamma_correction);
 }
 
+unsigned long gamma_dec16_table[256];
+unsigned long gamma_enc16_table[8192 + 1];
+
+bool gamma16_init = false;
+
+void gamma16_do_init(void);
+
 unsigned long gamma_dec16(unsigned long x) {
-    return x;
+    if (!gamma16_init) gamma16_do_init();
+
+    if (x > 255u) x = 255u;
+
+    return gamma_dec16_table[x];
 }
 
 double gamma_enc(double x) {
@@ -621,7 +632,21 @@ double gamma_enc(double x) {
 }
 
 unsigned long gamma_enc16(unsigned long x) {
-    return x;
+    if (!gamma16_init) gamma16_do_init();
+
+    if (x > 8192u) x = 8192u;
+
+    return gamma_enc16_table[x];
+}
+
+void gamma16_do_init(void) {
+    gamma16_init = true;
+
+    for (unsigned int i=0;i < 256;i++)
+        gamma_dec16_table[i] = (unsigned long)(gamma_dec(i / 255.0) * 8192);
+
+    for (unsigned int i=0;i < 8192;i++)
+        gamma_enc16_table[i] = (unsigned long)(gamma_enc(i / 8192.0) * 255);
 }
 
 int main(int argc,char **argv) {
@@ -884,9 +909,9 @@ int main(int argc,char **argv) {
                                 r += gamma_dec16(inframe[2]) * (unsigned long)weight16[wi];
                             }
 
-                            outframe[0] = gamma_enc16(b) >> 16u;
-                            outframe[1] = gamma_enc16(g) >> 16u;
-                            outframe[2] = gamma_enc16(r) >> 16u;
+                            outframe[0] = gamma_enc16(b >> 16ul);
+                            outframe[1] = gamma_enc16(g >> 16ul);
+                            outframe[2] = gamma_enc16(r >> 16ul);
                             outframe[3] = 0xFF;
 
                             outframe += 4;
