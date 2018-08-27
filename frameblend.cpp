@@ -833,6 +833,30 @@ int main(int argc,char **argv) {
 
                 assert(weights.size() == weight16.size());
 
+                for (unsigned int y=0;y < output_height;y++) {
+                    unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+                    for (unsigned int x=0;x < output_width;x++) {
+                        unsigned int r = 0,g = 0,b = 0;
+
+                        for (size_t wi=0;wi < weight16.size();wi++) {
+                            size_t fi = weights[wi].first;
+                            assert(fi < frames.size());
+                            unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
+
+                            b += inframe[0] * weight16[wi];
+                            g += inframe[1] * weight16[wi];
+                            r += inframe[2] * weight16[wi];
+                        }
+
+                        outframe[0] = b >> 16u;
+                        outframe[1] = g >> 16u;
+                        outframe[2] = r >> 16u;
+                        outframe[3] = 0xFF;
+
+                        outframe += 4;
+                    }
+                }
+
                 output_avstream_video_frame->pts = current;
                 output_avstream_video_frame->pkt_pts = current;
                 output_avstream_video_frame->pkt_dts = current;
