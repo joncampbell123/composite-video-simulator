@@ -171,6 +171,7 @@ public:
                 return 1;
             }
 
+#if 0
             /* prepare video encoding */
             input_avstream_video_frame_rgb = av_frame_alloc();
             if (input_avstream_video_frame_rgb == NULL) {
@@ -187,6 +188,7 @@ public:
                 return 1;
             }
             memset(input_avstream_video_frame_rgb->data[0],0,input_avstream_video_frame_rgb->linesize[0]*input_avstream_video_frame_rgb->height);
+#endif
         }
 
         input_avstream_video_resampler_format = AV_PIX_FMT_NONE;
@@ -305,6 +307,8 @@ public:
                 return;
             }
             memset(input_avstream_video_frame_rgb->data[0],0,input_avstream_video_frame_rgb->linesize[0]*input_avstream_video_frame_rgb->height);
+
+            fprintf(stderr,"RGB is %d, %d\n",input_avstream_video_frame_rgb->width,input_avstream_video_frame_rgb->height);
         }
 
         if (input_avstream_video_resampler != NULL) { // pixel format change or width/height change = free resampler and reinit
@@ -346,7 +350,8 @@ public:
                 input_avstream_video_resampler_y = (input_avstream_video_frame_rgb->height - final_h) / 2;
                 assert(input_avstream_video_resampler_x >= 0);
                 assert(input_avstream_video_resampler_y >= 0);
-//              fprintf(stderr,"ofs %d, %d\n",input_avstream_video_resampler_x,input_avstream_video_resampler_y);
+                fprintf(stderr,"dst %d, %d\n",input_avstream_video_frame_rgb->width,input_avstream_video_frame_rgb->height);
+                fprintf(stderr,"ofs %d, %d\n",input_avstream_video_resampler_x,input_avstream_video_resampler_y);
             }
             else {
                 fprintf(stderr,"sws_getContext fail\n");
