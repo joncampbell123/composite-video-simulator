@@ -934,18 +934,18 @@ int main(int argc,char **argv) {
 
                             if (bt < current)
                                 bt = current;
-                            if (bt > (current + framealt))
-                                bt = (current + framealt);
+                            if (bt > (current + 1ll))
+                                bt = (current + 1ll);
 
                             if (et < current)
                                 et = current;
-                            if (et > (current + framealt))
-                                et = (current + framealt);
+                            if (et > (current + 1ll))
+                                et = (current + 1ll);
 
                             assert(bt <= et);
 
                             if (bt < et)
-                                weights.push_back(pair<size_t,double>(i,(et-bt) / framealt));
+                                weights.push_back(pair<size_t,double>(i,et-bt));
                         }
                     }
                     else {
