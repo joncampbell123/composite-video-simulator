@@ -40,6 +40,7 @@ using namespace std;
 #include <vector>
 #include <stdexcept>
 
+bool            fullframealt = false;
 int             framealt = 1;
 
 double          gamma_correction = -1;
@@ -533,6 +534,9 @@ static int parse_argv(int argc,char **argv) {
                 output_height = (int)strtoul(a,NULL,0);
                 if (output_height < 32) return 1;
             }
+            else if (!strcmp(a,"ffa")) {
+                fullframealt = true;
+            }
             else if (!strcmp(a,"fa")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
@@ -934,18 +938,18 @@ int main(int argc,char **argv) {
 
                             if (bt < current)
                                 bt = current;
-                            if (bt > (current + 1ll))
-                                bt = (current + 1ll);
+                            if (bt > (current + (fullframealt ? framealt : 1)))
+                                bt = (current + (fullframealt ? framealt : 1));
 
                             if (et < current)
                                 et = current;
-                            if (et > (current + 1ll))
-                                et = (current + 1ll);
+                            if (et > (current + (fullframealt ? framealt : 1)))
+                                et = (current + (fullframealt ? framealt : 1));
 
                             assert(bt <= et);
 
                             if (bt < et)
-                                weights.push_back(pair<size_t,double>(i,et-bt));
+                                weights.push_back(pair<size_t,double>(i,(et-bt) / (fullframealt ? framealt : 1)));
                         }
                     }
                     else {
