@@ -40,6 +40,8 @@ using namespace std;
 #include <vector>
 #include <stdexcept>
 
+int             framealt = 1;
+
 double          gamma_correction = -1;
 
 int             underscan = 0;
@@ -531,6 +533,14 @@ static int parse_argv(int argc,char **argv) {
                 output_height = (int)strtoul(a,NULL,0);
                 if (output_height < 32) return 1;
             }
+            else if (!strcmp(a,"fa")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+
+                framealt = atoi(a);
+                if (framealt < 1) framealt = 1;
+                if (framealt > 8) framealt = 8;
+            }
             else if (!strcmp(a,"gamma")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
@@ -911,30 +921,59 @@ int main(int argc,char **argv) {
 
                 /* scan for first frame to render */
                 if (frames.size() > 1) {
-                    for (size_t i=0;(i+1ul) < frames.size();i++) {
-                        double bt = frame_t[i];
-                        double et = frame_t[i+1];
+                    if (framealt > 1) {
+                        for (size_t i=(size_t)((unsigned long long)current % (unsigned long long)framealt);(i+(size_t)framealt) < frames.size();i += (size_t)framealt) {
+                            double bt = frame_t[i];
+                            double et = frame_t[i+framealt];
 
-                        if (i != 0) {
-                            if ((et + 2.0) < current) {
-                                cutoff = i;
+                            if (i != 0) {
+                                if ((et + 2.0) < current) {
+                                    cutoff = i - (i % framealt);
+                                }
                             }
+
+                            if (bt < current)
+                                bt = current;
+                            if (bt > (current + framealt))
+                                bt = (current + framealt);
+
+                            if (et < current)
+                                et = current;
+                            if (et > (current + framealt))
+                                et = (current + framealt);
+
+                            assert(bt <= et);
+
+                            if (bt < et)
+                                weights.push_back(pair<size_t,double>(i,(et-bt) / framealt));
                         }
+                    }
+                    else {
+                        for (size_t i=0;(i+1ul) < frames.size();i++) {
+                            double bt = frame_t[i];
+                            double et = frame_t[i+1];
 
-                        if (bt < current)
-                            bt = current;
-                        if (bt > (current + 1ll))
-                            bt = (current + 1ll);
+                            if (i != 0) {
+                                if ((et + 2.0) < current) {
+                                    cutoff = i;
+                                }
+                            }
 
-                        if (et < current)
-                            et = current;
-                        if (et > (current + 1ll))
-                            et = (current + 1ll);
+                            if (bt < current)
+                                bt = current;
+                            if (bt > (current + 1ll))
+                                bt = (current + 1ll);
 
-                        assert(bt <= et);
+                            if (et < current)
+                                et = current;
+                            if (et > (current + 1ll))
+                                et = (current + 1ll);
 
-                        if (bt < et)
-                            weights.push_back(pair<size_t,double>(i,et-bt));
+                            assert(bt <= et);
+
+                            if (bt < et)
+                                weights.push_back(pair<size_t,double>(i,et-bt));
+                        }
                     }
                 }
 
