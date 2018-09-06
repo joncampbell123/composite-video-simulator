@@ -40,6 +40,8 @@ using namespace std;
 #include <vector>
 #include <stdexcept>
 
+bool            squelch_frameblend_near_match = false;
+
 bool            fullframealt = false;
 int             framealt = 1;
 
@@ -515,6 +517,9 @@ static int parse_argv(int argc,char **argv) {
                 output_height = (int)strtoul(a,NULL,0);
                 if (output_height < 32) return 1;
             }
+            else if (!strcmp(a,"sqnr")) {
+                squelch_frameblend_near_match = true;
+            }
             else if (!strcmp(a,"ffa")) {
                 fullframealt = true;
             }
@@ -950,6 +955,33 @@ int main(int argc,char **argv) {
 
                 if (weights.size() == 0 && frames.size() > cutoff)
                     weights.push_back(pair<size_t,double>(cutoff,1.0));
+
+                if (squelch_frameblend_near_match) {
+                    if (weights.size() == 2) {
+                        double sq = 1.0;
+
+                        assert(weights[0].first < frame_t.size());
+                        assert(weights[1].first < frame_t.size());
+
+                        double bt = frame_t[weights[0].first];
+                        double et = frame_t[weights[1].first];
+
+                        sq = fabs((et - bt) - 1.0) / 0.01; /* start squelching if less than 1% difference between source & dest rate */
+                        if (sq < 1.0) {
+                            sq = pow(sq,4.0);
+
+                            if (sq > 0.01) {
+                                if (weights[0].second > sq) weights[0].second = sq;
+                                weights[0].second /= sq;
+                                weights[1].second = 1.0 - weights[0].second;
+                            }
+                            else {
+                                weights[0].second = 1.0;
+                                weights[1].second = 0.0;
+                            }
+                        }
+                    }
+                }
 
                 std::vector<unsigned int> weight16;
 
