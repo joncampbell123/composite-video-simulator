@@ -957,7 +957,7 @@ int main(int argc,char **argv) {
                     weights.push_back(pair<size_t,double>(cutoff,1.0));
 
                 if (squelch_frameblend_near_match) {
-                    if (weights.size() == 2) {
+                    if (weights.size() == 2 || weights.size() == 3) {
                         double sq = 1.0;
 
                         assert(weights[0].first < frame_t.size());
@@ -968,7 +968,7 @@ int main(int argc,char **argv) {
 
                         sq = fabs((et - bt) - 1.0) / 0.01; /* start squelching if less than 1% difference between source & dest rate */
                         if (sq < 1.0) {
-                            sq = pow(sq,4.0);
+                            sq = pow(sq,2.0);
 
                             if (sq > 0.01) {
                                 if (weights[0].second > sq) weights[0].second = sq;
@@ -979,6 +979,9 @@ int main(int argc,char **argv) {
                                 weights[0].second = 1.0;
                                 weights[1].second = 0.0;
                             }
+
+                            if (weights.size() > 2)
+                                weights[2].second = 0.0;
                         }
                     }
                 }
