@@ -487,6 +487,15 @@ static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>               you can specify more than one input file, in order of layering\n");
 	fprintf(stderr," -o <output file>\n");
+    fprintf(stderr," -width <x>\n");
+    fprintf(stderr," -height <x>\n");
+    fprintf(stderr," -sqnr                         Squelch frame interpolation when frame rates match (1% margin)\n");
+    fprintf(stderr," -ffa                          Full frame alternate interpolation\n");
+    fprintf(stderr," -fa <x>                       Interpolate alternate frames\n");
+    fprintf(stderr," -gamma <x>                    Interpolate with gamma correction (number, ntsc, vga)\n");
+    fprintf(stderr," -underscan <x>                Underscan the image during rendering\n");
+    fprintf(stderr," -422                          Render to 4:2:2 colorspace\n");
+    fprintf(stderr," -420                          Render to 4:2:0 colorspace\n");
     fprintf(stderr,"\n");
     fprintf(stderr,"Note: Video is taken from first input file, and colormap taken from mid scanline of second video.\n");
 }
