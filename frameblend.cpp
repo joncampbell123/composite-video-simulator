@@ -487,6 +487,7 @@ static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>               you can specify more than one input file, in order of layering\n");
 	fprintf(stderr," -o <output file>\n");
+    fprintf(stderr," -or <frame rate>\n");
     fprintf(stderr," -width <x>\n");
     fprintf(stderr," -height <x>\n");
     fprintf(stderr," -sqnr                         Squelch frame interpolation when frame rates match (1% margin)\n");
@@ -553,6 +554,27 @@ static int parse_argv(int argc,char **argv) {
                 a = argv[i++];
                 if (a == NULL) return 1;
                 new_input_file().path = a;
+            }
+            else if (!strcmp(a,"or")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+
+                int d = 1;
+                double n = strtof(a,(char**)(&a));
+                if (*a == ':' || *a == '/' || *a == '\\') {
+                    a++;
+                    d = strtoul(a,(char**)(&a),10);
+                    if (d < 1) d = 1;
+                }
+
+                if (d > 1) {
+                    output_field_rate.num = (long)floor(n + 0.5);
+                    output_field_rate.den = (long)d;
+                }
+                else {
+                    output_field_rate.num = (long)floor((n * 10000) + 0.5);
+                    output_field_rate.den = (long)10000;
+                }
             }
             else if (!strcmp(a,"o")) {
                 a = argv[i++];
