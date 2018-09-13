@@ -567,6 +567,14 @@ static int parse_argv(int argc,char **argv) {
                     if (d < 1) d = 1;
                 }
 
+                if (n < 0) n = 0;
+
+                /* this code can cause problems below 5fps */
+                if ((n/d) < 5) {
+                    n = 5;
+                    d = 1;
+                }
+
                 if (d > 1) {
                     output_field_rate.num = (long)floor(n + 0.5);
                     output_field_rate.den = (long)d;
