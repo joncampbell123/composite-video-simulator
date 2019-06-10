@@ -173,7 +173,9 @@ int main(int argc, char **argv)
 
     int64_t pts_prev[ifmt_ctx->nb_streams];
     int64_t pts_adjust[ifmt_ctx->nb_streams];
+    double glob_adj;
 
+    glob_adj = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
         pts_prev[i] = AV_NOPTS_VALUE;
         pts_adjust[i] = 0;
