@@ -76,12 +76,14 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, cons
 #if 0
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
 
-    printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
+    printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d tb=%lld/%lld\n",
            tag,
            cpp_av_ts2str(pkt->pts).c_str(),         cpp_av_ts2timestr(pkt->pts, time_base).c_str(),
            cpp_av_ts2str(pkt->dts).c_str(),         cpp_av_ts2timestr(pkt->dts, time_base).c_str(),
            cpp_av_ts2str(pkt->duration).c_str(),    cpp_av_ts2timestr(pkt->duration, time_base).c_str(),
-           pkt->stream_index);
+           pkt->stream_index,
+           (signed long long)time_base->num,
+           (signed long long)time_base->den);
 #endif
 }
 
