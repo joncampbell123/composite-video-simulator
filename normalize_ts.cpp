@@ -206,6 +206,8 @@ int main(int argc, char **argv)
             continue;
         }
 
+        double d_ts = ((double)ts * in_stream->time_base.num) / in_stream->time_base.den;
+
         log_packet(ifmt_ctx, &pkt, "in");
 
         /* adjust time */
