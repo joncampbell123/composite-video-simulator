@@ -55,6 +55,22 @@ static std::string ffmpeg_averrtostring(const int ret) {
     return std::string(err);
 }
 
+static std::string cpp_av_ts2str(int64_t ts) {
+    char str[AV_TS_MAX_STRING_SIZE];
+
+    av_ts_make_string(str, ts);
+    return std::string(str);
+}
+
+static std::string cpp_av_ts2timestr(int64_t ts, AVRational *tb) {
+    char str[AV_TS_MAX_STRING_SIZE];
+
+    if (ts == AV_NOPTS_VALUE) snprintf(str, AV_TS_MAX_STRING_SIZE, "NOPTS");
+    else                      snprintf(str, AV_TS_MAX_STRING_SIZE, "%.6g", av_q2d(*tb) * ts);
+
+    return std::string(str);
+}
+
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
 {
 #if 0
@@ -62,9 +78,9 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, cons
 
     printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
            tag,
-           av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, time_base),
-           av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, time_base),
-           av_ts2str(pkt->duration), av_ts2timestr(pkt->duration, time_base),
+           cpp_av_ts2str(pkt->pts).c_str(),         cpp_av_ts2timestr(pkt->pts, time_base).c_str(),
+           cpp_av_ts2str(pkt->dts).c_str(),         cpp_av_ts2timestr(pkt->dts, time_base).c_str(),
+           cpp_av_ts2str(pkt->duration).c_str(),    cpp_av_ts2timestr(pkt->duration, time_base).c_str(),
            pkt->stream_index);
 #endif
 }
