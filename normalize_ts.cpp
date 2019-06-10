@@ -207,6 +207,12 @@ int main(int argc, char **argv)
         }
 
         double d_ts = ((double)ts * in_stream->time_base.num) / in_stream->time_base.den;
+        if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
+            double p_ts = ((double)pts_prev[pkt.stream_index] * in_stream->time_base.num) / in_stream->time_base.den;
+
+            // TODO
+        }
+        pts_prev[pkt.stream_index] = ts;
 
         log_packet(ifmt_ctx, &pkt, "in");
 
