@@ -66,7 +66,6 @@ int main(int argc, char **argv)
     AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
     AVPacket pkt;
     const char *in_filename, *out_filename;
-    unsigned long long ppts = 0;
     int ret, i;
 
     if (argc < 3) {
@@ -120,12 +119,6 @@ int main(int argc, char **argv)
         out_stream->codec->codec_tag = 0;
         if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
             out_stream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-        if (out_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-            /* we need to hack the video frame rate to 29.97 (30000/1001) */
-//            out_stream->time_base.num = 1001;
-//            out_stream->time_base.den = 30000;
-        }
     }
     av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
@@ -170,29 +163,6 @@ int main(int argc, char **argv)
         pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
         pkt.pos = -1;
 
-        /* HACK YA! */
-        if (out_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-            const signed long long step = 2585LL;
-            signed long long was = pkt.dts;
-
-            /* HACK: as if 1/90000 */
-            if (pkt.dts >= (ppts - step) && pkt.dts <= (ppts + step)) pkt.dts = ppts + step;
-            pkt.duration = step;
-
-            if (pkt.dts < ppts)
-                pkt.dts = ppts + 1LL;
-            if (pkt.pts < pkt.dts)
-                pkt.pts = pkt.dts;
-
-#if 0
-            fprintf(stderr,"%lld => %lld at rate %llu/%llu\n",was,pkt.dts,
-                (unsigned long long)out_stream->time_base.num,
-                (unsigned long long)out_stream->time_base.den);
-#endif
-
-            ppts = pkt.dts;
-        }
-
         log_packet(ofmt_ctx, &pkt, "out");
 
         ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
@@ -214,7 +184,8 @@ end:
     avformat_free_context(ofmt_ctx);
 
     if (ret < 0 && ret != AVERROR_EOF) {
-        fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
+        fprintf(stderr,"Error occurred\n");
+//        fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
         return 1;
     }
 
