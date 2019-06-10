@@ -193,8 +193,12 @@ int main(int argc, char **argv)
 
         if (pkt.dts != AV_NOPTS_VALUE)
             ts = pkt.dts;
-        if (pkt.pts != AV_NOPTS_VALUE)
-            ts = std::min(pkt.pts,ts); // DTS should not exceed PTS
+        if (pkt.pts != AV_NOPTS_VALUE) {
+            if (ts != AV_NOPTS_VALUE)
+                ts = std::min(pkt.pts,ts); // DTS should not exceed PTS
+            else
+                ts = pkt.pts;
+        }
 
         log_packet(ifmt_ctx, &pkt, "in");
 
