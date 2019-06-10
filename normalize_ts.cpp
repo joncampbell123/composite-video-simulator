@@ -171,6 +171,14 @@ int main(int argc, char **argv)
 	signal(SIGQUIT,sigma);
 	signal(SIGTERM,sigma);
 
+    int64_t pts_prev[ifmt_ctx->nb_streams];
+    int64_t pts_adjust[ifmt_ctx->nb_streams];
+
+    for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
+        pts_prev[i] = AV_NOPTS_VALUE;
+        pts_adjust[i] = 0;
+    }
+
     while (!DIE) {
         AVStream *in_stream, *out_stream;
 
@@ -182,6 +190,12 @@ int main(int argc, char **argv)
         out_stream = ofmt_ctx->streams[pkt.stream_index];
 
         log_packet(ifmt_ctx, &pkt, "in");
+
+        /* adjust time */
+        if (pkt.pts != AV_NOPTS_VALUE)
+            pkt.pts += pts_adjust[pkt.stream_index];
+        if (pkt.dts != AV_NOPTS_VALUE)
+            pkt.dts += pts_adjust[pkt.stream_index];
 
         /* copy packet */
         pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
