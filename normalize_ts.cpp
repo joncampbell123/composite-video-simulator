@@ -200,6 +200,12 @@ int main(int argc, char **argv)
                 ts = pkt.pts;
         }
 
+        if (ts == AV_NOPTS_VALUE) {
+            printf("* Dropping AVPacket with no timestamps\n");
+            av_packet_unref(&pkt);
+            continue;
+        }
+
         log_packet(ifmt_ctx, &pkt, "in");
 
         /* adjust time */
