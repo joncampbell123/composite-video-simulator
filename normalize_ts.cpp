@@ -39,10 +39,20 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
+#include <string>
+
 volatile int DIE = 0;
 
 void sigma(int x) {
 	if (++DIE >= 20) abort();
+}
+
+// FFMPEG's convenience macro causes GCC to complain when compiled as C++11
+static std::string ffmpeg_averrtostring(const int ret) {
+    char err[AV_ERROR_MAX_STRING_SIZE] = {0};
+
+    av_make_error_string(err, AV_ERROR_MAX_STRING_SIZE, ret);
+    return std::string(err);
 }
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
@@ -184,8 +194,7 @@ end:
     avformat_free_context(ofmt_ctx);
 
     if (ret < 0 && ret != AVERROR_EOF) {
-        fprintf(stderr,"Error occurred\n");
-//        fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
+        fprintf(stderr, "Error occurred: %s\n", ffmpeg_averrtostring(ret).c_str());
         return 1;
     }
 
