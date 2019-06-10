@@ -189,6 +189,13 @@ int main(int argc, char **argv)
         in_stream  = ifmt_ctx->streams[pkt.stream_index];
         out_stream = ofmt_ctx->streams[pkt.stream_index];
 
+        int64_t ts = AV_NOPTS_VALUE;
+
+        if (pkt.dts != AV_NOPTS_VALUE)
+            ts = pkt.dts;
+        if (pkt.pts != AV_NOPTS_VALUE)
+            ts = std::min(pkt.pts,ts); // DTS should not exceed PTS
+
         log_packet(ifmt_ctx, &pkt, "in");
 
         /* adjust time */
