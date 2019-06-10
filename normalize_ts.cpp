@@ -213,10 +213,24 @@ int main(int argc, char **argv)
         double d_ts = ((double)ts * in_stream->time_base.num) / in_stream->time_base.den;
         if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
             double p_ts = ((double)pts_prev[pkt.stream_index] * in_stream->time_base.num) / in_stream->time_base.den;
+            double delta = d_ts - p_ts;
+            double adj_delta;
 
-            // TODO
+            if (delta < 0)
+                adj_delta = std::min(delta+0.1,0.0);
+            else
+                adj_delta = std::max(delta-2.0,0.0);
+
+            if (adj_delta != 0.0) {
+                glob_adj -= adj_delta;
+
+                for (int i=0;i < ifmt_ctx->nb_streams;i++)
+                    pts_adjust[i] = (int64_t)((glob_adj * in_stream->time_base.den) / in_stream->time_base.num);
+            }
         }
         pts_prev[pkt.stream_index] = ts;
+        if (pkt.duration > 0ll)
+            pts_prev[pkt.stream_index] += pkt.duration;
 
         log_packet(ifmt_ctx, &pkt, "in");
 
