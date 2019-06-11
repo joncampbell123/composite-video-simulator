@@ -141,12 +141,14 @@ int main(int argc, char **argv)
     int64_t pts_prev[ifmt_ctx->nb_streams];
     int64_t pts_final[ifmt_ctx->nb_streams];
     int64_t pts_prevdur[ifmt_ctx->nb_streams];
+    bool stream_wait_key[ifmt_ctx->nb_streams];
     double glob_adj;
 
     glob_adj = 0;
     trk_stream = -1;
     stream_outcount = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
+        stream_wait_key[i] = true;
         pts_final[i] = AV_NOPTS_VALUE;
         pts_prev[i] = AV_NOPTS_VALUE;
         pts_prevdur[i] = 0;
@@ -238,9 +240,20 @@ int main(int argc, char **argv)
         if (ret < 0)
             break;
 
+        if (stream_wait_key[i]) {
+            if (!(pkt.flags & AV_PKT_FLAG_KEY)) {
+                av_packet_unref(&pkt);
+                continue;
+            }
+
+            stream_wait_key[i] = false;
+        }
+
         int out_stream_index = stream_map[pkt.stream_index];
-        if (out_stream_index < 0)
+        if (out_stream_index < 0) {
+            av_packet_unref(&pkt);
             continue;
+        }
 
         in_stream  = ifmt_ctx->streams[pkt.stream_index];
         out_stream = ofmt_ctx->streams[out_stream_index];
@@ -300,6 +313,7 @@ int main(int argc, char **argv)
         ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
         if (ret < 0) {
             fprintf(stderr, "Error muxing packet\n");
+            av_packet_unref(&pkt);
             break;
         }
         av_packet_unref(&pkt);
