@@ -147,10 +147,10 @@ int main(int argc, char **argv)
     trk_stream = -1;
     stream_outcount = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
+        pts_final[i] = AV_NOPTS_VALUE;
         pts_prev[i] = AV_NOPTS_VALUE;
         pts_prevdur[i] = 0;
         stream_map[i] = -1;
-        pts_final[i] = 0;
     }
 
     for (i = 0; i < ifmt_ctx->nb_streams; i++) {
@@ -259,16 +259,23 @@ int main(int argc, char **argv)
                 ts = pts_prev[pkt.stream_index] + pts_prevdur[pkt.stream_index];
         }
 
-        if (ts != AV_NOPTS_VALUE) {
-            if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
-                if (ts >= pts_prev[pkt.stream_index])
-                    pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
-                else
-                    pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
-            }
-            else {
-                pts_final[pkt.stream_index] = ts;
-            }
+        if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
+            if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
+                pts_final[pkt.stream_index] = 0;
+
+            if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index])
+                pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
+            else
+                pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
+        }
+        else if (ts != AV_NOPTS_VALUE && pts_final[pkt.stream_index] == AV_NOPTS_VALUE) {
+            pts_final[pkt.stream_index] = ts;
+        }
+        else {
+            if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
+                pts_final[pkt.stream_index] = 0;
+
+            pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
         }
 
         pts_prev[pkt.stream_index] = ts;
