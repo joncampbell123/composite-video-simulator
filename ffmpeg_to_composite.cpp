@@ -2096,7 +2096,7 @@ int main(int argc,char **argv) {
 
 		// our output is interlaced
 		if (output_video_as_interlaced)
-			output_avstream_video_codec_context->flags |= CODEC_FLAG_INTERLACED_DCT;
+			output_avstream_video_codec_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
 
 		if (avcodec_open2(output_avstream_video_codec_context,avcodec_find_encoder(AV_CODEC_ID_H264),NULL) < 0) {
 			fprintf(stderr,"Output stream cannot open codec\n");
