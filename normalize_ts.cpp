@@ -89,6 +89,7 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, cons
 
 int main(int argc, char **argv)
 {
+    const char *fmtname = NULL;
     AVOutputFormat *ofmt = NULL;
     AVDictionary *mp4_dict = NULL;
     AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
@@ -121,7 +122,11 @@ int main(int argc, char **argv)
 
     av_dump_format(ifmt_ctx, 0, in_filename, 0);
 
-    avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename);
+    /* .vob does not mean svcd you idiot */
+    if (strstr(out_filename,".vob") != NULL)
+        fmtname = "vob";
+
+    avformat_alloc_output_context2(&ofmt_ctx, NULL, fmtname, out_filename);
     if (!ofmt_ctx) {
         fprintf(stderr, "Could not create output context\n");
         ret = AVERROR_UNKNOWN;
