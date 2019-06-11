@@ -135,6 +135,7 @@ int main(int argc, char **argv)
 
     ofmt = ofmt_ctx->oformat;
 
+    int trk_stream;
     int stream_outcount;
     int stream_map[ifmt_ctx->nb_streams];
     int64_t pts_prev[ifmt_ctx->nb_streams];
@@ -142,6 +143,7 @@ int main(int argc, char **argv)
     double glob_adj;
 
     glob_adj = 0;
+    trk_stream = -1;
     stream_outcount = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
         pts_prev[i] = AV_NOPTS_VALUE;
@@ -174,6 +176,35 @@ int main(int argc, char **argv)
         stream_map[i] = stream_outcount++;
     }
     av_dump_format(ofmt_ctx, 0, out_filename, 1);
+
+    if (trk_stream < 0) {
+        for (i = 0; i < ifmt_ctx->nb_streams; i++) {
+            AVStream *in_stream = ifmt_ctx->streams[i];
+
+            if (in_stream->codec == NULL) continue;
+            if (stream_map[i] < 0) continue;
+            if (in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
+                trk_stream = i;
+                break;
+            }
+        }
+    }
+
+    if (trk_stream < 0) {
+        for (i = 0; i < ifmt_ctx->nb_streams; i++) {
+            AVStream *in_stream = ifmt_ctx->streams[i];
+
+            if (in_stream->codec == NULL) continue;
+            if (stream_map[i] < 0) continue;
+            if (in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+                trk_stream = i;
+                break;
+            }
+        }
+    }
+
+    if (trk_stream < 0)
+        printf("WARNING, no tracking stream\n");
 
     if (!(ofmt->flags & AVFMT_NOFILE)) {
         ret = avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE);
