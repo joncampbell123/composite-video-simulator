@@ -135,12 +135,14 @@ int main(int argc, char **argv)
 
     ofmt = ofmt_ctx->oformat;
 
+    int stream_outcount;
     int stream_map[ifmt_ctx->nb_streams];
     int64_t pts_prev[ifmt_ctx->nb_streams];
     int64_t pts_adjust[ifmt_ctx->nb_streams];
     double glob_adj;
 
     glob_adj = 0;
+    stream_outcount = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
         pts_prev[i] = AV_NOPTS_VALUE;
         stream_map[i] = -1;
@@ -164,6 +166,8 @@ int main(int argc, char **argv)
         out_stream->codec->codec_tag = 0;
         if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
             out_stream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+        stream_map[i] = stream_outcount++;
     }
     av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
