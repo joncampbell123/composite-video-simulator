@@ -255,24 +255,20 @@ int main(int argc, char **argv)
             ts = pkt.dts;
 
         if (ts == AV_NOPTS_VALUE || ts == pts_prev[pkt.stream_index]) {
-            if (pts_prev[pkt.stream_index] == AV_NOPTS_VALUE ||
-                pts_prevdur[pkt.stream_index] <= 0) {
-                printf("* Dropping AVPacket with no timestamps\n");
-                av_packet_unref(&pkt);
-                continue;
+            if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE)
+                ts = pts_prev[pkt.stream_index] + pts_prevdur[pkt.stream_index];
+        }
+
+        if (ts != AV_NOPTS_VALUE) {
+            if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
+                if (ts >= pts_prev[pkt.stream_index])
+                    pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
+                else
+                    pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
             }
-
-            ts = pts_prev[pkt.stream_index] + pts_prevdur[pkt.stream_index];
-        }
-
-        if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
-            if (ts >= pts_prev[pkt.stream_index])
-                pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
-            else
-                pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
-        }
-        else {
-            pts_final[pkt.stream_index] = ts;
+            else {
+                pts_final[pkt.stream_index] = ts;
+            }
         }
 
         pts_prev[pkt.stream_index] = ts;
