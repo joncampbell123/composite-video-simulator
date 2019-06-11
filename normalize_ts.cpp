@@ -260,6 +260,7 @@ int main(int argc, char **argv)
 
         int64_t ts = AV_NOPTS_VALUE;
         int64_t pts_dts_delta = 0;
+        int64_t too_far_forward = (int64_t)((5.0 * in_stream->time_base.den) / in_stream->time_base.num);
 
         if (pkt.dts != AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE)
             pts_dts_delta = pkt.pts - pkt.dts;
@@ -276,7 +277,7 @@ int main(int argc, char **argv)
             if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
                 pts_final[pkt.stream_index] = 0;
 
-            if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index])
+            if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index] && ts < (pts_prev[pkt.stream_index] + too_far_forward))
                 pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
             else
                 pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
