@@ -73,7 +73,7 @@ static std::string cpp_av_ts2timestr(int64_t ts, AVRational *tb) {
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
 {
-#if 0
+#if 1
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
 
     printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d tb=%lld/%lld\n",
@@ -216,12 +216,8 @@ int main(int argc, char **argv)
 
         if (pkt.dts != AV_NOPTS_VALUE)
             ts = pkt.dts;
-        if (pkt.pts != AV_NOPTS_VALUE) {
-            if (ts != AV_NOPTS_VALUE)
-                ts = std::min(pkt.pts,ts); // DTS should not exceed PTS
-            else
-                ts = pkt.pts;
-        }
+        else if (pkt.pts != AV_NOPTS_VALUE)
+            ts = pkt.pts;
 
         if (ts == AV_NOPTS_VALUE) {
             printf("* Dropping AVPacket with no timestamps\n");
@@ -236,9 +232,9 @@ int main(int argc, char **argv)
             double adj_delta;
 
             if (delta < 0)
-                adj_delta = std::min(delta+0.1,0.0);
+                adj_delta = std::min(delta+0.01,0.0);
             else
-                adj_delta = std::max(delta-2.0,0.0);
+                adj_delta = std::max(delta-2.00,0.0);
 
             if (adj_delta != 0.0) {
                 glob_adj -= adj_delta;
