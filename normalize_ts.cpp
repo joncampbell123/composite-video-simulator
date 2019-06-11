@@ -244,6 +244,10 @@ int main(int argc, char **argv)
         out_stream = ofmt_ctx->streams[out_stream_index];
 
         int64_t ts = AV_NOPTS_VALUE;
+        int64_t pts_dts_delta = 0;
+
+        if (pkt.dts != AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE)
+            pts_dts_delta = pkt.pts - pkt.dts;
 
         if (pkt.dts != AV_NOPTS_VALUE)
             ts = pkt.dts;
