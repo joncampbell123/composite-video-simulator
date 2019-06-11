@@ -135,6 +135,18 @@ int main(int argc, char **argv)
 
     ofmt = ofmt_ctx->oformat;
 
+    int stream_map[ifmt_ctx->nb_streams];
+    int64_t pts_prev[ifmt_ctx->nb_streams];
+    int64_t pts_adjust[ifmt_ctx->nb_streams];
+    double glob_adj;
+
+    glob_adj = 0;
+    for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
+        pts_prev[i] = AV_NOPTS_VALUE;
+        stream_map[i] = -1;
+        pts_adjust[i] = 0;
+    }
+
     for (i = 0; i < ifmt_ctx->nb_streams; i++) {
         AVStream *in_stream = ifmt_ctx->streams[i];
         AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
@@ -177,16 +189,6 @@ int main(int argc, char **argv)
 	signal(SIGHUP,sigma);
 	signal(SIGQUIT,sigma);
 	signal(SIGTERM,sigma);
-
-    int64_t pts_prev[ifmt_ctx->nb_streams];
-    int64_t pts_adjust[ifmt_ctx->nb_streams];
-    double glob_adj;
-
-    glob_adj = 0;
-    for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
-        pts_prev[i] = AV_NOPTS_VALUE;
-        pts_adjust[i] = 0;
-    }
 
     while (!DIE) {
         AVStream *in_stream, *out_stream;
