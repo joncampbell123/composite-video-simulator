@@ -139,7 +139,8 @@ int main(int argc, char **argv)
     int stream_outcount;
     int stream_map[ifmt_ctx->nb_streams];
     int64_t pts_prev[ifmt_ctx->nb_streams];
-    int64_t pts_adjust[ifmt_ctx->nb_streams];
+    int64_t pts_final[ifmt_ctx->nb_streams];
+    int64_t pts_prevdur[ifmt_ctx->nb_streams];
     double glob_adj;
 
     glob_adj = 0;
@@ -147,8 +148,9 @@ int main(int argc, char **argv)
     stream_outcount = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
         pts_prev[i] = AV_NOPTS_VALUE;
+        pts_prevdur[i] = 0;
         stream_map[i] = -1;
-        pts_adjust[i] = 0;
+        pts_final[i] = 0;
     }
 
     for (i = 0; i < ifmt_ctx->nb_streams; i++) {
@@ -251,44 +253,37 @@ int main(int argc, char **argv)
 
         if (pkt.dts != AV_NOPTS_VALUE)
             ts = pkt.dts;
-        else if (pkt.pts != AV_NOPTS_VALUE)
-            ts = pkt.pts;
 
-        if (ts == AV_NOPTS_VALUE) {
-            printf("* Dropping AVPacket with no timestamps\n");
-            av_packet_unref(&pkt);
-            continue;
-        }
-
-        double d_ts = ((double)ts * in_stream->time_base.num) / in_stream->time_base.den;
-        if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
-            double p_ts = ((double)pts_prev[pkt.stream_index] * in_stream->time_base.num) / in_stream->time_base.den;
-            double delta = d_ts - p_ts;
-            double adj_delta;
-
-            if (delta < 0)
-                adj_delta = std::min(delta+0.01,0.0);
-            else
-                adj_delta = std::max(delta-2.00,0.0);
-
-            if (adj_delta != 0.0) {
-                glob_adj -= adj_delta;
-
-                for (int i=0;i < ifmt_ctx->nb_streams;i++)
-                    pts_adjust[i] = (int64_t)((glob_adj * in_stream->time_base.den) / in_stream->time_base.num);
+        if (ts == AV_NOPTS_VALUE || ts == pts_prev[pkt.stream_index]) {
+            if (pts_prev[pkt.stream_index] == AV_NOPTS_VALUE ||
+                pts_prevdur[pkt.stream_index] <= 0) {
+                printf("* Dropping AVPacket with no timestamps\n");
+                av_packet_unref(&pkt);
+                continue;
             }
+
+            ts = pts_prev[pkt.stream_index] + pts_prevdur[pkt.stream_index];
         }
+
+        if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
+            if (ts >= pts_prev[pkt.stream_index])
+                pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
+            else
+                pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
+        }
+        else {
+            pts_final[pkt.stream_index] = ts;
+        }
+
         pts_prev[pkt.stream_index] = ts;
-        if (pkt.duration > 0ll)
-            pts_prev[pkt.stream_index] += pkt.duration;
+        pts_prevdur[pkt.stream_index] = pkt.duration;
 
         log_packet(ifmt_ctx, &pkt, "in");
 
         /* adjust time */
+        pkt.dts = pts_final[pkt.stream_index];
         if (pkt.pts != AV_NOPTS_VALUE)
-            pkt.pts += pts_adjust[pkt.stream_index];
-        if (pkt.dts != AV_NOPTS_VALUE)
-            pkt.dts += pts_adjust[pkt.stream_index];
+            pkt.pts = pkt.dts + pts_dts_delta;
 
         /* copy packet */
         pkt.stream_index = out_stream_index;
