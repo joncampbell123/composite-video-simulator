@@ -151,6 +151,10 @@ int main(int argc, char **argv)
 
     for (i = 0; i < ifmt_ctx->nb_streams; i++) {
         AVStream *in_stream = ifmt_ctx->streams[i];
+
+        if (in_stream->codec == NULL) continue;
+        if (!(in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO || in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO)) continue;
+
         AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
         if (!out_stream) {
             fprintf(stderr, "Failed allocating output stream\n");
@@ -201,8 +205,12 @@ int main(int argc, char **argv)
         if (ret < 0)
             break;
 
+        int out_stream_index = stream_map[pkt.stream_index];
+        if (out_stream_index < 0)
+            continue;
+
         in_stream  = ifmt_ctx->streams[pkt.stream_index];
-        out_stream = ofmt_ctx->streams[pkt.stream_index];
+        out_stream = ofmt_ctx->streams[out_stream_index];
 
         int64_t ts = AV_NOPTS_VALUE;
 
@@ -252,6 +260,7 @@ int main(int argc, char **argv)
             pkt.dts += pts_adjust[pkt.stream_index];
 
         /* copy packet */
+        pkt.stream_index = out_stream_index;
         pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
         pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
         pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
