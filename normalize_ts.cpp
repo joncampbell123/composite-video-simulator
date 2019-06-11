@@ -73,7 +73,7 @@ static std::string cpp_av_ts2timestr(int64_t ts, AVRational *tb) {
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
 {
-#if 1
+#if 0
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
 
     printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d tb=%lld/%lld\n",
