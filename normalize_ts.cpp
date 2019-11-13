@@ -140,6 +140,7 @@ int main(int argc, char **argv)
     int stream_map[ifmt_ctx->nb_streams];
     int64_t pts_prev[ifmt_ctx->nb_streams];
     int64_t pts_final[ifmt_ctx->nb_streams];
+    int64_t pts_finaladd[ifmt_ctx->nb_streams];
     int64_t pts_prevdur[ifmt_ctx->nb_streams];
     bool stream_wait_key[ifmt_ctx->nb_streams];
     double glob_adj;
@@ -151,6 +152,7 @@ int main(int argc, char **argv)
         stream_wait_key[i] = true;
         pts_final[i] = AV_NOPTS_VALUE;
         pts_prev[i] = AV_NOPTS_VALUE;
+        pts_finaladd[i] = 0;
         pts_prevdur[i] = 0;
         stream_map[i] = -1;
     }
@@ -260,7 +262,7 @@ int main(int argc, char **argv)
 
         int64_t ts = AV_NOPTS_VALUE;
         int64_t pts_dts_delta = 0;
-        int64_t too_far_forward = (int64_t)((5.0 * in_stream->time_base.den) / in_stream->time_base.num);
+        int64_t too_far_forward = (int64_t)((60.0 * in_stream->time_base.den) / in_stream->time_base.num);
 
         if (pkt.dts != AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE)
             pts_dts_delta = pkt.pts - pkt.dts;
@@ -277,28 +279,33 @@ int main(int argc, char **argv)
             if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
                 pts_final[pkt.stream_index] = 0;
 
-            if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index] && ts < (pts_prev[pkt.stream_index] + too_far_forward))
+            if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index] && ts < (pts_prev[pkt.stream_index] + too_far_forward)) {
                 pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
-            else
-                pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
+                pts_finaladd[pkt.stream_index] = 0;
+                pts_prev[pkt.stream_index] = ts;
+            }
+            else {
+                pts_finaladd[pkt.stream_index] += pts_prevdur[pkt.stream_index];
+            }
         }
         else if (ts != AV_NOPTS_VALUE && pts_final[pkt.stream_index] == AV_NOPTS_VALUE) {
             pts_final[pkt.stream_index] = ts;
+            pts_finaladd[pkt.stream_index] = 0;
+            pts_prev[pkt.stream_index] = ts;
         }
         else {
             if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
                 pts_final[pkt.stream_index] = 0;
 
-            pts_final[pkt.stream_index] += pts_prevdur[pkt.stream_index];
+            pts_finaladd[pkt.stream_index] += pts_prevdur[pkt.stream_index];
         }
 
-        pts_prev[pkt.stream_index] = ts;
         pts_prevdur[pkt.stream_index] = pkt.duration;
 
         log_packet(ifmt_ctx, &pkt, "in");
 
         /* adjust time */
-        pkt.dts = pts_final[pkt.stream_index];
+        pkt.dts = pts_final[pkt.stream_index] + pts_finaladd[pkt.stream_index];
         if (pkt.pts != AV_NOPTS_VALUE)
             pkt.pts = pkt.dts + pts_dts_delta;
 
@@ -315,7 +322,7 @@ int main(int argc, char **argv)
         if (ret < 0) {
             fprintf(stderr, "Error muxing packet\n");
             av_packet_unref(&pkt);
-            break;
+            continue;
         }
         av_packet_unref(&pkt);
     }
