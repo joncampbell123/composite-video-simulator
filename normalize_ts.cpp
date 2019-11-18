@@ -226,7 +226,6 @@ int main(int argc, char **argv)
 
         stream_map[i] = stream_outcount++;
     }
-    av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
     if (trk_stream < 0) {
         for (i = 0; i < ifmt_ctx->nb_streams; i++) {
@@ -273,6 +272,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "Error occurred when opening output file\n");
         goto end;
     }
+
+    av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
 	/* soft break on CTRL+C */
 	signal(SIGINT,sigma);
