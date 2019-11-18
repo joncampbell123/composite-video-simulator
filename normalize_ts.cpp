@@ -142,6 +142,7 @@ int main(int argc, char **argv)
     int64_t pts_final[ifmt_ctx->nb_streams];
     int64_t pts_finaladd[ifmt_ctx->nb_streams];
     int64_t pts_prevdur[ifmt_ctx->nb_streams];
+    int64_t stream_start[ifmt_ctx->nb_streams];
     bool stream_wait_key[ifmt_ctx->nb_streams];
     double glob_adj;
 
@@ -150,6 +151,7 @@ int main(int argc, char **argv)
     stream_outcount = 0;
     for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
         stream_wait_key[i] = true;
+        stream_start[i] = AV_NOPTS_VALUE;
         pts_final[i] = AV_NOPTS_VALUE;
         pts_prev[i] = AV_NOPTS_VALUE;
         pts_finaladd[i] = 0;
@@ -281,6 +283,64 @@ int main(int argc, char **argv)
 	signal(SIGQUIT,sigma);
 	signal(SIGTERM,sigma);
 
+    /* if there are programs, set the timestamps from the minimum of all streams in the programs (mpegts) */
+    {
+        unsigned int pi;
+
+        for (pi=0;pi < ifmt_ctx->nb_programs;pi++) {
+            int64_t min_start = AV_NOPTS_VALUE;
+            AVProgram *p = ifmt_ctx->programs[pi];
+            unsigned int sii;
+
+            for (sii=0;sii < p->nb_stream_indexes;sii++) {
+                unsigned int si = p->stream_index[sii];
+                if (si < ifmt_ctx->nb_streams) {
+                    if (ifmt_ctx->streams[si]->start_time != AV_NOPTS_VALUE) {
+                        if (min_start == AV_NOPTS_VALUE || min_start > ifmt_ctx->streams[si]->start_time)
+                            min_start = ifmt_ctx->streams[si]->start_time;
+                    }
+                }
+            }
+
+            if (min_start != AV_NOPTS_VALUE) {
+                for (sii=0;sii < p->nb_stream_indexes;sii++) {
+                    unsigned int si = p->stream_index[sii];
+                    if (si < ifmt_ctx->nb_streams)
+                        stream_start[si] = min_start;
+                }
+            }
+        }
+    }
+
+    /* set a timestamp baseline from the start times of all streams */
+    {
+        int64_t min_start = AV_NOPTS_VALUE;
+
+        for (i=0;i < ifmt_ctx->nb_streams;i++) {
+            if (ifmt_ctx->streams[i]->start_time != AV_NOPTS_VALUE) {
+                if (min_start == AV_NOPTS_VALUE || min_start > ifmt_ctx->streams[i]->start_time)
+                    min_start = ifmt_ctx->streams[i]->start_time;
+            }
+        }
+
+        if (min_start != AV_NOPTS_VALUE) {
+            for (i=0;i < ifmt_ctx->nb_streams;i++) {
+                if (stream_start[i] == AV_NOPTS_VALUE)
+                    stream_start[i] = min_start;
+            }
+        }
+    }
+
+    /* if that didn't work, just set it to zero which effectively copies at least the first packet timestamp */
+    for (i=0;i < ifmt_ctx->nb_streams;i++) {
+        if (stream_start[i] == AV_NOPTS_VALUE)
+            stream_start[i] = 0;
+    }
+
+    fprintf(stderr,"Stream starts:\n");
+    for (i=0;i < ifmt_ctx->nb_streams;i++)
+        fprintf(stderr," #%d: %lld\n",i,(signed long long)stream_start[i]);
+
     while (!DIE) {
         AVStream *in_stream, *out_stream;
 
@@ -341,7 +401,7 @@ int main(int argc, char **argv)
             }
         }
         else if (ts != AV_NOPTS_VALUE && pts_final[pkt.stream_index] == AV_NOPTS_VALUE) {
-            pts_final[pkt.stream_index] = ts;
+            pts_final[pkt.stream_index] = ts - stream_start[pkt.stream_index];
             pts_finaladd[pkt.stream_index] = 0;
             pts_prev[pkt.stream_index] = ts;
         }
