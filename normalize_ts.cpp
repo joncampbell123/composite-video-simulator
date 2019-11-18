@@ -341,7 +341,7 @@ int main(int argc, char **argv)
             }
         }
         else if (ts != AV_NOPTS_VALUE && pts_final[pkt.stream_index] == AV_NOPTS_VALUE) {
-            pts_final[pkt.stream_index] = 0;
+            pts_final[pkt.stream_index] = ts;
             pts_finaladd[pkt.stream_index] = 0;
             pts_prev[pkt.stream_index] = ts;
         }
