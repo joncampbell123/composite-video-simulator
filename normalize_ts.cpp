@@ -287,13 +287,13 @@ int main(int argc, char **argv)
         if (ret < 0)
             break;
 
-        if (stream_wait_key[i]) {
+        if (stream_wait_key[pkt.stream_index]) {
             if (!(pkt.flags & AV_PKT_FLAG_KEY)) {
                 av_packet_unref(&pkt);
                 continue;
             }
 
-            stream_wait_key[i] = false;
+            stream_wait_key[pkt.stream_index] = false;
         }
 
         int out_stream_index = stream_map[pkt.stream_index];
