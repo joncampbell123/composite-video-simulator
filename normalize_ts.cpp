@@ -157,11 +157,49 @@ int main(int argc, char **argv)
         stream_map[i] = -1;
     }
 
+    /* MPEG ts files have a PMT */
+    {
+        unsigned int i;
+        AVProgram *p;
+
+        for (i=0;i < ifmt_ctx->nb_programs;i++) {
+            p = ifmt_ctx->programs[i];
+            fprintf(stderr,"Program #%u id=%d num=%d pmt=%d pcr=%d pmtver=%d\n",
+                i,p->id,p->program_num,p->pmt_pid,p->pcr_pid,p->pmt_version);
+
+            AVProgram *np = av_new_program(ofmt_ctx, p->id);
+            if (np != NULL) {
+                np->id = p->id;
+                np->program_num = p->program_num;
+                np->pmt_pid = p->pmt_pid;
+                np->pcr_pid = p->pcr_pid;
+                np->pmt_version = p->pmt_version;
+            }
+            else {
+                fprintf(stderr,"Failed to create program\n");
+            }
+        }
+    }
+
     for (i = 0; i < ifmt_ctx->nb_streams; i++) {
         AVStream *in_stream = ifmt_ctx->streams[i];
 
         if (in_stream->codec == NULL) continue;
         if (!(in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO || in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO)) continue;
+
+        AVProgram *in_program = av_find_program_from_stream(ifmt_ctx, NULL, i);
+        AVProgram *out_program = NULL;
+
+        if (in_program != NULL) {
+            unsigned int j;
+            for (j=0;j < ofmt_ctx->nb_programs;j++) {
+                AVProgram *op = ofmt_ctx->programs[j];
+                if (op->id == in_program->id) {
+                    out_program = op;
+                    break;
+                }
+            }
+        }
 
         AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
         if (!out_stream) {
@@ -178,6 +216,13 @@ int main(int argc, char **argv)
         out_stream->codec->codec_tag = 0;
         if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
             out_stream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+        out_stream->id = in_stream->id;
+        if (out_program != NULL) {
+            out_stream->program_num = out_program->program_num;
+            out_stream->pmt_version = out_program->pmt_version;
+            av_program_add_stream_index(ofmt_ctx, out_program->id, i);
+        }
 
         stream_map[i] = stream_outcount++;
     }
