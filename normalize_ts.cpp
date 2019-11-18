@@ -221,7 +221,7 @@ int main(int argc, char **argv)
         if (out_program != NULL) {
             out_stream->program_num = out_program->program_num;
             out_stream->pmt_version = out_program->pmt_version;
-            av_program_add_stream_index(ofmt_ctx, out_program->id, i);
+            av_program_add_stream_index(ofmt_ctx, out_program->id, out_stream->index);
         }
 
         stream_map[i] = stream_outcount++;
