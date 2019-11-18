@@ -287,6 +287,12 @@ int main(int argc, char **argv)
         if (ret < 0)
             break;
 
+        /* NTS: The mpegts demuxer can and will add streams during reading (as it finds them).
+         *      If we blindly use the stream index we will cause a segfault
+         *      writing to an output stream that does not exist! Range check for sanity! */
+        if (pkt.stream_index >= ofmt_ctx->nb_streams)
+            continue;
+
         if (stream_wait_key[pkt.stream_index]) {
             if (!(pkt.flags & AV_PKT_FLAG_KEY)) {
                 av_packet_unref(&pkt);
