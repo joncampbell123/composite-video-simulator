@@ -32,6 +32,7 @@
 #define __STDC_FORMAT_MACROS
 
 #include <signal.h>
+#include <assert.h>
 
 extern "C" {
 #include <libavutil/error.h>
@@ -95,18 +96,44 @@ int main(int argc, char **argv)
     AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
     AVPacket pkt;
     const char *in_filename, *out_filename;
-    int ret, i;
+    int ret, i, program = -1;
 
     if (argc < 3) {
-        printf("usage: %s input output\n"
+        printf("usage: %s [options] input output\n"
                "API example program to remux a media file with libavformat and libavcodec.\n"
                "The output format is guessed according to the file extension.\n"
                "\n", argv[0]);
         return 1;
     }
 
+    while (argv[1][0] == '-') {
+        int o = 1;
+        int scan = 1;
+        char *opt = argv[scan++];
+        while (*opt == '-') opt++;
+
+        if (!strcmp(opt,"program")) {
+            char *a = argv[scan++];
+            if (a == NULL) return 1;
+            program = atoi(a);
+        }
+        else {
+            fprintf(stderr,"Unknown option %s\n",opt);
+            return 1;
+        }
+
+        while (scan < argc)
+            argv[o++] = argv[scan++];
+
+        argv[o] = NULL;
+        argc = o;
+    }
+
     in_filename  = argv[1];
     out_filename = argv[2];
+
+    if (program >= 0)
+        fprintf(stderr,"Will only copy program %d\n",program);
 
     av_register_all();
 
@@ -137,6 +164,7 @@ int main(int argc, char **argv)
 
     int trk_stream;
     int stream_outcount;
+    int ifmt_ctx_lock_nb_streams;
     int stream_map[ifmt_ctx->nb_streams];
     int64_t pts_prev[ifmt_ctx->nb_streams];
     int64_t pts_final[ifmt_ctx->nb_streams];
@@ -168,6 +196,11 @@ int main(int argc, char **argv)
             p = ifmt_ctx->programs[i];
             fprintf(stderr,"Program #%u id=%d num=%d pmt=%d pcr=%d pmtver=%d\n",
                 i,p->id,p->program_num,p->pmt_pid,p->pcr_pid,p->pmt_version);
+
+            if (program >= 0) {
+                if (p->id != program)
+                    continue;
+            }
 
             AVProgram *np = av_new_program(ofmt_ctx, p->id);
             if (np != NULL) {
@@ -203,6 +236,11 @@ int main(int argc, char **argv)
             }
         }
 
+        if (program >= 0 && in_program != NULL) {
+            if (in_program->id != program)
+                continue;
+        }
+
         AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
         if (!out_stream) {
             fprintf(stderr, "Failed allocating output stream\n");
@@ -226,7 +264,7 @@ int main(int argc, char **argv)
             av_program_add_stream_index(ofmt_ctx, out_program->id, out_stream->index);
         }
 
-        stream_map[i] = stream_outcount++;
+        stream_map[i] = out_stream->index;
     }
 
     if (trk_stream < 0) {
@@ -292,6 +330,11 @@ int main(int argc, char **argv)
             AVProgram *p = ifmt_ctx->programs[pi];
             unsigned int sii;
 
+            if (program >= 0) {
+                if (p->id != program)
+                    continue;
+            }
+
             for (sii=0;sii < p->nb_stream_indexes;sii++) {
                 unsigned int si = p->stream_index[sii];
                 if (si < ifmt_ctx->nb_streams) {
@@ -341,6 +384,17 @@ int main(int argc, char **argv)
     for (i=0;i < ifmt_ctx->nb_streams;i++)
         fprintf(stderr," #%d: %lld\n",i,(signed long long)stream_start[i]);
 
+    fprintf(stderr,"Stream mapping (i->o):\n");
+    for (i=0;i < ifmt_ctx->nb_streams;i++)
+        fprintf(stderr," #%d to #%d\n",i,stream_map[i]);
+
+    fprintf(stderr,"%d input streams, %d output streams\n",
+        ifmt_ctx->nb_streams,
+        ofmt_ctx->nb_streams);
+
+    /* track the initial stream count NOW because mpegts will add onto it later! */
+    ifmt_ctx_lock_nb_streams = ifmt_ctx->nb_streams;
+
     while (!DIE) {
         AVStream *in_stream, *out_stream;
 
@@ -351,7 +405,7 @@ int main(int argc, char **argv)
         /* NTS: The mpegts demuxer can and will add streams during reading (as it finds them).
          *      If we blindly use the stream index we will cause a segfault
          *      writing to an output stream that does not exist! Range check for sanity! */
-        if (pkt.stream_index >= ofmt_ctx->nb_streams)
+        if (pkt.stream_index >= ifmt_ctx_lock_nb_streams)
             continue;
 
         if (stream_wait_key[pkt.stream_index]) {
@@ -367,6 +421,12 @@ int main(int argc, char **argv)
         if (out_stream_index < 0) {
             av_packet_unref(&pkt);
             continue;
+        }
+
+        if (out_stream_index >= ofmt_ctx->nb_streams) {
+            fprintf(stderr,"Output stream index out of range! %d >= %d\n",out_stream_index,ofmt_ctx->nb_streams);
+            fprintf(stderr,"From input stream index %d out of %d total\n",pkt.stream_index,ifmt_ctx->nb_streams);
+            abort();
         }
 
         in_stream  = ifmt_ctx->streams[pkt.stream_index];
