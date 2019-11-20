@@ -304,7 +304,7 @@ int main(int argc, char **argv)
         }
     }
 
-    av_dict_set(&mp4_dict, "movflags", "faststart", 0);
+//  av_dict_set(&mp4_dict, "movflags", "faststart", 0);
     av_dict_set(&mp4_dict, "chunk_duration", "30", 0);
 
     ret = avformat_write_header(ofmt_ctx, &mp4_dict);
