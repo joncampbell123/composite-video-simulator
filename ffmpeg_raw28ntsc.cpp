@@ -161,7 +161,7 @@ void sigma(int x) {
 }
 
 void preset_PAL() {
-	output_field_rate.num = 50;
+	output_field_rate.num = 25;
 	output_field_rate.den = 1;
 	output_height = 576;
 	output_width = 720;
@@ -170,7 +170,7 @@ void preset_PAL() {
 }
 
 void preset_NTSC() {
-	output_field_rate.num = 60000;
+	output_field_rate.num = 30000;
 	output_field_rate.den = 1001;
 	output_height = 525;
 	output_width = 910;
@@ -179,7 +179,7 @@ void preset_NTSC() {
 }
 
 void preset_720p60() {
-	output_field_rate.num = 60000;
+	output_field_rate.num = 30000;
 	output_field_rate.den = 1001;
 	output_height = 720;
 	output_width = 1280;
@@ -188,7 +188,7 @@ void preset_720p60() {
 }
 
 void preset_1080p60() {
-	output_field_rate.num = 60000;
+	output_field_rate.num = 30000;
 	output_field_rate.den = 1001;
 	output_height = 1080;
 	output_width = 1920;
