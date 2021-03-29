@@ -446,7 +446,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 #endif
 
                     /* horizontal sync */
-                    int px = (int)(one_scanline_raw_length * 1.0);
+                    int px = (int)(one_scanline_raw_length * (1.0 - (0.075/2.0)));
                     if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
                     int dev = center - px;
 
