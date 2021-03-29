@@ -48,6 +48,7 @@ using namespace std;
 
 std::list<string>           src_composite;
 
+unsigned long long          src_byte_counter = 0; /* at beginning of input buffer */
 int                         src_fd = -1;
 
 bool            use_422_colorspace = true;
@@ -69,10 +70,14 @@ static const unsigned int   one_scanline_raw_length = (unsigned int)(one_scanlin
 double                      one_scanline_width = one_scanline_time + 0.0499;
 double                      one_scanline_width_err = 0;
 
-unsigned char               int_scanline[4096];
+signed int                  int_scanline[4096];
 
 std::vector<uint8_t>                input_samples;
 std::vector<uint8_t>::iterator      input_samples_read,input_samples_end;
+
+unsigned long long total_count_src() {
+    return src_byte_counter + (input_samples_read - input_samples.begin());
+}
 
 size_t count_src() {
     assert(input_samples_read <= input_samples_end);
@@ -80,12 +85,14 @@ size_t count_src() {
 }
 
 void empty_src() {
+    src_byte_counter = total_count_src();
     input_samples_read = input_samples_end = input_samples.begin();
 }
 
 void flush_src() {
     assert(input_samples_read <= input_samples_end);
     if (input_samples_read != input_samples.begin()) {
+        src_byte_counter = total_count_src();
         size_t move = input_samples_read - input_samples.begin();
         assert(move != 0);
         size_t todo = input_samples_end - input_samples_read;
@@ -317,6 +324,77 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
+/* sync separator and detection */
+struct syncsep_t {
+    int                     blanking;
+    int                     pedastal;
+    int                     whitepoint;
+
+    unsigned int            pixels_since_hsync;
+    unsigned int            pixels_since_vsync;
+    unsigned int            lines_since_vsync;
+
+    syncsep_t() :
+        blanking(64),   /* I'd choose 24 but my VCR's "blue background" has an extra bright sync pulse */
+        pedastal(64),   /* NTSC pedastal */
+        whitepoint(235) /* what "100% white" is */
+    {
+        reset_hsync_counter();
+        reset_vsync_counter();
+        /* don't worry, sync separation and vsync pulse handling of the "equalization pulses" should adjust these automatically */
+    }
+
+    void reset_hsync_counter() {
+        pixels_since_hsync = 0;
+    }
+    void reset_vsync_counter() {
+        pixels_since_vsync = 0;
+        lines_since_vsync = 0;
+    }
+};
+
+struct syncpulse_t {
+    int                     start;
+    int                     end;
+    int                     level;
+
+    syncpulse_t() : start(-1), end(-1), level(-1) { }
+    bool detected() const {
+        return (start < end);
+    }
+};
+
+syncsep_t           syncsep;
+
+void sync_detect(syncpulse_t &result,const syncsep_t &syncsep,std::vector<uint8_t>::iterator input_samples_read,std::vector<uint8_t>::iterator input_samples_end,unsigned int start,unsigned int end,unsigned int min_sync,unsigned int max_sync) {
+    int count = 0;
+    unsigned int x = start;
+    result.start = result.end = -1;
+
+    while (x < end) {
+        if (input_samples_read[x] < syncsep.blanking) {
+            if (count == 0)
+                result.start = x;
+
+            count++;
+        }
+        else {
+            if (count >= min_sync && count <= max_sync) {
+                result.end = x;
+                result.level = 0;
+                for (int y=result.start;y < result.end;y++) result.level += input_samples_read[y];
+                result.level /= (result.end - result.start);
+                break;
+            }
+
+            result.start = -1;
+            count = 0;
+        }
+
+        x++;
+    }
+}
+
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fieldno) {
     double sx,sy,tx,ty;
@@ -334,19 +412,49 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     if (dstframe->data[0] == NULL) return;
     if (dstframe->linesize[0] < (dstframe->width*4)) return; // ARGB
 
+    double fieldt = ((double)fieldno * output_field_rate.den) / output_field_rate.num;
+    double filet = (double)total_count_src() / sample_rate;
+
     for (y=0;y < dstframe->height;y++) {
         lazy_flush_src();
-        if (count_src() < (one_scanline_raw_length*2)) {
+        if (count_src() < (one_scanline_raw_length*4)) {
             empty_src();
             break;
         }
 
+        /* locate hsync */
+        {
+            syncpulse_t h;
+
+            /* sync pulse should be 0.075H +/- 0.005H. These constraints are needed to detect only hsync, not vsync. */
+            sync_detect(/*&*/h,syncsep,input_samples_read,input_samples_end,/*start*/(int)(one_scanline_raw_length * 0.08),/*end*/(int)(one_scanline_raw_length * 1.1),
+                /* sync min */(int)(one_scanline_raw_length * 0.06),/* sync max */(int)(one_scanline_raw_length * 0.08));
+#if 0
+            fprintf(stderr,"sync h: det=%u start=%d end=%d level=%d\n",
+                h.detected(),h.start,h.end,h.level);
+#endif
+
+            if (h.detected()) {
+                int center = (h.start+h.end)/2;
+                int dist = (h.end-h.start);
+                int px = (int)(one_scanline_raw_length * 1.0);
+                if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
+                int dev = center - px;
+
+                one_scanline_width = one_scanline_raw_length + (((double)dev * dist * 0.3) / one_scanline_raw_length);
+            }
+        }
+
+        /* use interpolation because our concept of "one scanline" isn't exactly an integer.
+         * without interpolation, adjustment can be a bit jagged. */
         {
             int a = (int)floor(one_scanline_width_err * 256);
             if (a < 0) a = 0;
             if (a > 256) a = 256;
-            for (x=0;x < (one_scanline_raw_length+16);x++)
-                int_scanline[x] = (unsigned char)(((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8);
+            for (x=0;x < (one_scanline_raw_length+16);x++) {
+                int v = ((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8;
+                int_scanline[x] = ((v - syncsep.pedastal) * 255) / (syncsep.whitepoint - syncsep.pedastal);
+            }
         }
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
