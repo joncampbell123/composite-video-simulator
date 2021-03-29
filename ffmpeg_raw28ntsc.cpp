@@ -441,6 +441,10 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 int center = (h.start+h.end)/2;
                 int dist = (h.end-h.start);
                 if (dist >= (int)(one_scanline_raw_length * 0.070) && dist <= (int)(one_scanline_raw_length * 0.080)) {
+#if 0
+                    fprintf(stderr,"hsync\n");
+#endif
+
                     /* horizontal sync */
                     int px = (int)(one_scanline_raw_length * 1.0);
                     if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
@@ -449,6 +453,10 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     one_scanline_width = one_scanline_raw_length + (((double)dev * dist * 0.3) / one_scanline_raw_length);
                 }
                 else if (dist >= (int)(one_scanline_raw_length * 0.29/*FIXME: What? Should be 0.43H*/)) {
+#if 0
+                    fprintf(stderr,"vsync\n");
+#endif
+
                     /* vertical sync */
                     int fy = y % (dstframe->height/2);
                     if (fy != 0) {
@@ -460,6 +468,33 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                             repeat_scanline++;
                         }
                     }
+                }
+                else if (dist >= (int)(one_scanline_raw_length * 0.025/*FIXME: What? Should be 0.04H*/) && dist <= (int)(one_scanline_raw_length * 0.055)) {
+                    /* equalizing pulses. the non-sync pulses are the reference blanking level */
+                    int blank = 0,blankdiv = 0;
+                    int sync = 0,syncdiv = 0;
+
+                    for (int x=h.start;x < (h.start+(int)(one_scanline_raw_length * 0.055));x++) {
+                        if (input_samples_read[x] >= syncsep.blanking) {
+                            blank += input_samples_read[x];
+                            blankdiv++;
+                        }
+                        else {
+                            sync += input_samples_read[x];
+                            syncdiv++;
+                        }
+                    }
+
+                    if (blankdiv > 0) blank /= blankdiv;
+                    if (syncdiv > 0) sync /= syncdiv;
+
+                    if (syncdiv > 0 && blankdiv > 0 && sync < blank) {
+                        syncsep.pedastal = ((syncsep.pedastal * 15) + blank + 8) / 16;
+                    }
+
+#if 0
+                    fprintf(stderr,"equ blank=%d sync=%d\n",blank,sync);
+#endif
                 }
             }
         }
