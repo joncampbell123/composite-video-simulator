@@ -53,7 +53,7 @@ int                         src_fd = -1;
 bool            use_422_colorspace = true;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
-int		output_height = 525;
+int		output_height = 480;
 bool        input_ntsc = false;
 bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
@@ -164,7 +164,7 @@ void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
 	output_height = 525;
-	output_width = 720;
+	output_width = 910;
 	output_pal = false;
 	output_ntsc = true;
 }
