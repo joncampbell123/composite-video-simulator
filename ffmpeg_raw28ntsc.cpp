@@ -66,7 +66,7 @@ static const double         one_frame_time =   sample_rate / (30000.00 / 1001.00
 static const double         one_scanline_time = one_frame_time / 525.00;            /* one scanline */
 static const unsigned int   one_scanline_raw_length = (unsigned int)(one_scanline_time + 0.5);
 
-double                      one_scanline_width = one_scanline_time + 0.0495;
+double                      one_scanline_width = one_scanline_time + 0.0499;
 double                      one_scanline_width_err = 0;
 
 unsigned char               int_scanline[4096];
