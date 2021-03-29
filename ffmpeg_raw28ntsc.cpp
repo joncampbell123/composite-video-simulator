@@ -74,6 +74,10 @@ size_t count_src() {
     return (input_samples_end - input_samples_read);
 }
 
+void empty_src() {
+    input_samples_read = input_samples_end = input_samples.begin();
+}
+
 void flush_src() {
     assert(input_samples_read <= input_samples_end);
     if (input_samples_read != input_samples.begin()) {
