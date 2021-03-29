@@ -397,6 +397,8 @@ void sync_detect(syncpulse_t &result,const syncsep_t &syncsep,std::vector<uint8_
 
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fieldno) {
+    int consume_scanline=0;
+    int repeat_scanline=0;
     double sx,sy,tx,ty;
     unsigned int dx,dy;
     unsigned int ystep;
@@ -415,7 +417,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     double fieldt = ((double)fieldno * output_field_rate.den) / output_field_rate.num;
     double filet = (double)total_count_src() / sample_rate;
 
-    for (y=0;y < dstframe->height;y++) {
+    for (y=0;y < (dstframe->height-repeat_scanline);y++) {
         lazy_flush_src();
         if (count_src() < (one_scanline_raw_length*4)) {
             empty_src();
@@ -426,22 +428,39 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
         {
             syncpulse_t h;
 
-            /* sync pulse should be 0.075H +/- 0.005H. These constraints are needed to detect only hsync, not vsync. */
-            sync_detect(/*&*/h,syncsep,input_samples_read,input_samples_end,/*start*/(int)(one_scanline_raw_length * 0.08),/*end*/(int)(one_scanline_raw_length * 1.1),
-                /* sync min */(int)(one_scanline_raw_length * 0.06),/* sync max */(int)(one_scanline_raw_length * 0.08));
+            /* sync pulse should be 0.075H +/- 0.005H. These constraints are needed to detect only hsync, not vsync.
+             * equalizing pulses should be 0.04H, vertical sync pulse should be 0.43H (0.5H - 0.07H) */
+            sync_detect(/*&*/h,syncsep,input_samples_read,input_samples_end,/*start*/(int)(one_scanline_raw_length * 0.08),/*end*/(int)(one_scanline_raw_length * 1.2),
+                /* sync min */(int)(one_scanline_raw_length * 0.03),/* sync max */(int)(one_scanline_raw_length * 0.45));
 #if 0
-            fprintf(stderr,"sync h: det=%u start=%d end=%d level=%d\n",
-                h.detected(),h.start,h.end,h.level);
+            fprintf(stderr,"sync h: det=%u start=%d end=%d level=%d dist=%.3fH\n",
+                h.detected(),h.start,h.end,h.level,(double)(h.end-h.start) / one_scanline_raw_length);
 #endif
 
             if (h.detected()) {
                 int center = (h.start+h.end)/2;
                 int dist = (h.end-h.start);
-                int px = (int)(one_scanline_raw_length * 1.0);
-                if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
-                int dev = center - px;
+                if (dist >= (int)(one_scanline_raw_length * 0.070) && dist <= (int)(one_scanline_raw_length * 0.080)) {
+                    /* horizontal sync */
+                    int px = (int)(one_scanline_raw_length * 1.0);
+                    if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
+                    int dev = center - px;
 
-                one_scanline_width = one_scanline_raw_length + (((double)dev * dist * 0.3) / one_scanline_raw_length);
+                    one_scanline_width = one_scanline_raw_length + (((double)dev * dist * 0.3) / one_scanline_raw_length);
+                }
+                else if (dist >= (int)(one_scanline_raw_length * 0.29/*FIXME: What? Should be 0.43H*/)) {
+                    /* vertical sync */
+                    int fy = y % (dstframe->height/2);
+                    if (fy != 0) {
+                        if (fy < (dstframe->height/4)) {
+                            /* one extra scanline needs to be consumed to shift up the image */
+                            consume_scanline++;
+                        }
+                        else {
+                            repeat_scanline++;
+                        }
+                    }
+                }
             }
         }
 
@@ -483,6 +502,16 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             }
             input_samples_read += adj;
         }
+    }
+
+    if (consume_scanline > 0) {
+        unsigned int adj = floor(one_scanline_width);
+        one_scanline_width_err += one_scanline_width - adj;
+        if (one_scanline_width_err >= 1.0) {
+            one_scanline_width_err -= 1.0;
+            adj++;
+        }
+        input_samples_read += adj;
     }
 }
 
