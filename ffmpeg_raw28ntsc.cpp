@@ -63,8 +63,13 @@ int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 static const double         subcarrier_freq = (315000000.00        / 88.00);        /* 315/88 MHz = about 3.57954 MHz */
 static const double         sample_rate =    ((315000000.00 * 8.0) / 88.00);        /* 315/88 * MHz = about 28.636363 MHz */
 static const double         one_frame_time =   sample_rate / (30000.00 / 1001.00);  /* 30000/1001 = about 29.97 */
-static const double         one_scanline_time = one_frame_time / 525;               /* one scanline */
+static const double         one_scanline_time = one_frame_time / 525.00;            /* one scanline */
 static const unsigned int   one_scanline_raw_length = (unsigned int)(one_scanline_time + 0.5);
+
+double                      one_scanline_width = one_scanline_time + 0.0495;
+double                      one_scanline_width_err = 0;
+
+unsigned char               int_scanline[4096];
 
 std::vector<uint8_t>                input_samples;
 std::vector<uint8_t>::iterator      input_samples_read,input_samples_end;
@@ -331,14 +336,24 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
     for (y=0;y < dstframe->height;y++) {
         lazy_flush_src();
-        if (count_src() < one_scanline_raw_length) break;
+        if (count_src() < (one_scanline_raw_length*2)) {
+            empty_src();
+            break;
+        }
+
+        {
+            int a = (int)floor(one_scanline_width_err * 256);
+            if (a < 0) a = 0;
+            if (a > 256) a = 256;
+            for (x=0;x < (one_scanline_raw_length+16);x++)
+                int_scanline[x] = (unsigned char)(((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8);
+        }
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
         for (x=0;x < dstframe->width;x++) {
             size_t si = x * 2;
-            if ((input_samples_read+si) > input_samples_end) break;
             int r,g,b;
-            int Y = input_samples_read[si];
+            int Y = int_scanline[si];
 
             r = g = b = Y;
             if (r < 0) r = 0;
@@ -351,7 +366,15 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             dst[x] = (r + (g << 8) + (b << 16) + 0xFF000000);
         }
 
-        input_samples_read += one_scanline_raw_length;
+        {
+            unsigned int adj = floor(one_scanline_width);
+            one_scanline_width_err += one_scanline_width - adj;
+            if (one_scanline_width_err >= 1.0) {
+                one_scanline_width_err -= 1.0;
+                adj++;
+            }
+            input_samples_read += adj;
+        }
     }
 }
 
