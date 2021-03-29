@@ -162,344 +162,346 @@ int main(int argc, char **argv)
 
     ofmt = ofmt_ctx->oformat;
 
-    int trk_stream;
-    int stream_outcount;
-    int ifmt_ctx_lock_nb_streams;
-    int stream_map[ifmt_ctx->nb_streams];
-    int64_t pts_prev[ifmt_ctx->nb_streams];
-    int64_t pts_final[ifmt_ctx->nb_streams];
-    int64_t pts_finaladd[ifmt_ctx->nb_streams];
-    int64_t pts_prevdur[ifmt_ctx->nb_streams];
-    int64_t stream_start[ifmt_ctx->nb_streams];
-    bool stream_wait_key[ifmt_ctx->nb_streams];
-    double glob_adj;
-
-    glob_adj = 0;
-    trk_stream = -1;
-    stream_outcount = 0;
-    for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
-        stream_wait_key[i] = true;
-        stream_start[i] = AV_NOPTS_VALUE;
-        pts_final[i] = AV_NOPTS_VALUE;
-        pts_prev[i] = AV_NOPTS_VALUE;
-        pts_finaladd[i] = 0;
-        pts_prevdur[i] = 0;
-        stream_map[i] = -1;
-    }
-
-    /* MPEG ts files have a PMT */
     {
-        unsigned int i;
-        AVProgram *p;
+        int trk_stream;
+        int stream_outcount;
+        int ifmt_ctx_lock_nb_streams;
+        int stream_map[ifmt_ctx->nb_streams];
+        int64_t pts_prev[ifmt_ctx->nb_streams];
+        int64_t pts_final[ifmt_ctx->nb_streams];
+        int64_t pts_finaladd[ifmt_ctx->nb_streams];
+        int64_t pts_prevdur[ifmt_ctx->nb_streams];
+        int64_t stream_start[ifmt_ctx->nb_streams];
+        bool stream_wait_key[ifmt_ctx->nb_streams];
+        double glob_adj;
 
-        for (i=0;i < ifmt_ctx->nb_programs;i++) {
-            p = ifmt_ctx->programs[i];
-            fprintf(stderr,"Program #%u id=%d num=%d pmt=%d pcr=%d pmtver=%d\n",
-                i,p->id,p->program_num,p->pmt_pid,p->pcr_pid,p->pmt_version);
+        glob_adj = 0;
+        trk_stream = -1;
+        stream_outcount = 0;
+        for (size_t i=0;i < ifmt_ctx->nb_streams;i++) {
+            stream_wait_key[i] = true;
+            stream_start[i] = AV_NOPTS_VALUE;
+            pts_final[i] = AV_NOPTS_VALUE;
+            pts_prev[i] = AV_NOPTS_VALUE;
+            pts_finaladd[i] = 0;
+            pts_prevdur[i] = 0;
+            stream_map[i] = -1;
+        }
 
-            if (program >= 0) {
-                if (p->id != program)
+        /* MPEG ts files have a PMT */
+        {
+            unsigned int i;
+            AVProgram *p;
+
+            for (i=0;i < ifmt_ctx->nb_programs;i++) {
+                p = ifmt_ctx->programs[i];
+                fprintf(stderr,"Program #%u id=%d num=%d pmt=%d pcr=%d pmtver=%d\n",
+                        i,p->id,p->program_num,p->pmt_pid,p->pcr_pid,p->pmt_version);
+
+                if (program >= 0) {
+                    if (p->id != program)
+                        continue;
+                }
+
+                AVProgram *np = av_new_program(ofmt_ctx, p->id);
+                if (np != NULL) {
+                    np->id = p->id;
+                    np->program_num = p->program_num;
+                    np->pmt_pid = p->pmt_pid;
+                    np->pcr_pid = p->pcr_pid;
+                    np->pmt_version = p->pmt_version;
+                }
+                else {
+                    fprintf(stderr,"Failed to create program\n");
+                }
+            }
+        }
+
+        for (i = 0; i < ifmt_ctx->nb_streams; i++) {
+            AVStream *in_stream = ifmt_ctx->streams[i];
+
+            if (in_stream->codec == NULL) continue;
+            if (!(in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO || in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO)) continue;
+
+            AVProgram *in_program = av_find_program_from_stream(ifmt_ctx, NULL, i);
+            AVProgram *out_program = NULL;
+
+            if (in_program != NULL) {
+                unsigned int j;
+                for (j=0;j < ofmt_ctx->nb_programs;j++) {
+                    AVProgram *op = ofmt_ctx->programs[j];
+                    if (op->id == in_program->id) {
+                        out_program = op;
+                        break;
+                    }
+                }
+            }
+
+            if (program >= 0 && in_program != NULL) {
+                if (in_program->id != program)
                     continue;
             }
 
-            AVProgram *np = av_new_program(ofmt_ctx, p->id);
-            if (np != NULL) {
-                np->id = p->id;
-                np->program_num = p->program_num;
-                np->pmt_pid = p->pmt_pid;
-                np->pcr_pid = p->pcr_pid;
-                np->pmt_version = p->pmt_version;
+            AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
+            if (!out_stream) {
+                fprintf(stderr, "Failed allocating output stream\n");
+                ret = AVERROR_UNKNOWN;
+                goto end;
             }
-            else {
-                fprintf(stderr,"Failed to create program\n");
+
+            ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+            if (ret < 0) {
+                fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
+                goto end;
             }
+            out_stream->codec->codec_tag = 0;
+            if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+                out_stream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+            out_stream->id = in_stream->id;
+            if (out_program != NULL) {
+                out_stream->program_num = out_program->program_num;
+                out_stream->pmt_version = out_program->pmt_version;
+                av_program_add_stream_index(ofmt_ctx, out_program->id, out_stream->index);
+            }
+
+            stream_map[i] = out_stream->index;
         }
-    }
 
-    for (i = 0; i < ifmt_ctx->nb_streams; i++) {
-        AVStream *in_stream = ifmt_ctx->streams[i];
+        if (trk_stream < 0) {
+            for (i = 0; i < ifmt_ctx->nb_streams; i++) {
+                AVStream *in_stream = ifmt_ctx->streams[i];
 
-        if (in_stream->codec == NULL) continue;
-        if (!(in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO || in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO)) continue;
-
-        AVProgram *in_program = av_find_program_from_stream(ifmt_ctx, NULL, i);
-        AVProgram *out_program = NULL;
-
-        if (in_program != NULL) {
-            unsigned int j;
-            for (j=0;j < ofmt_ctx->nb_programs;j++) {
-                AVProgram *op = ofmt_ctx->programs[j];
-                if (op->id == in_program->id) {
-                    out_program = op;
+                if (in_stream->codec == NULL) continue;
+                if (stream_map[i] < 0) continue;
+                if (in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
+                    trk_stream = i;
                     break;
                 }
             }
         }
 
-        if (program >= 0 && in_program != NULL) {
-            if (in_program->id != program)
-                continue;
+        if (trk_stream < 0) {
+            for (i = 0; i < ifmt_ctx->nb_streams; i++) {
+                AVStream *in_stream = ifmt_ctx->streams[i];
+
+                if (in_stream->codec == NULL) continue;
+                if (stream_map[i] < 0) continue;
+                if (in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+                    trk_stream = i;
+                    break;
+                }
+            }
         }
 
-        AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
-        if (!out_stream) {
-            fprintf(stderr, "Failed allocating output stream\n");
-            ret = AVERROR_UNKNOWN;
-            goto end;
+        if (trk_stream < 0)
+            printf("WARNING, no tracking stream\n");
+
+        if (!(ofmt->flags & AVFMT_NOFILE)) {
+            ret = avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE);
+            if (ret < 0) {
+                fprintf(stderr, "Could not open output file '%s'", out_filename);
+                goto end;
+            }
         }
 
-        ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+        //  av_dict_set(&mp4_dict, "movflags", "faststart", 0);
+        av_dict_set(&mp4_dict, "chunk_duration", "30", 0);
+
+        ret = avformat_write_header(ofmt_ctx, &mp4_dict);
         if (ret < 0) {
-            fprintf(stderr, "Failed to copy context from input to output stream codec context\n");
+            fprintf(stderr, "Error occurred when opening output file\n");
             goto end;
         }
-        out_stream->codec->codec_tag = 0;
-        if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-            out_stream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-        out_stream->id = in_stream->id;
-        if (out_program != NULL) {
-            out_stream->program_num = out_program->program_num;
-            out_stream->pmt_version = out_program->pmt_version;
-            av_program_add_stream_index(ofmt_ctx, out_program->id, out_stream->index);
-        }
+        av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
-        stream_map[i] = out_stream->index;
-    }
+        /* soft break on CTRL+C */
+        signal(SIGINT,sigma);
+        signal(SIGHUP,sigma);
+        signal(SIGQUIT,sigma);
+        signal(SIGTERM,sigma);
 
-    if (trk_stream < 0) {
-        for (i = 0; i < ifmt_ctx->nb_streams; i++) {
-            AVStream *in_stream = ifmt_ctx->streams[i];
+        /* if there are programs, set the timestamps from the minimum of all streams in the programs (mpegts) */
+        {
+            unsigned int pi;
 
-            if (in_stream->codec == NULL) continue;
-            if (stream_map[i] < 0) continue;
-            if (in_stream->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
-                trk_stream = i;
-                break;
-            }
-        }
-    }
+            for (pi=0;pi < ifmt_ctx->nb_programs;pi++) {
+                int64_t min_start = AV_NOPTS_VALUE;
+                AVProgram *p = ifmt_ctx->programs[pi];
+                unsigned int sii;
 
-    if (trk_stream < 0) {
-        for (i = 0; i < ifmt_ctx->nb_streams; i++) {
-            AVStream *in_stream = ifmt_ctx->streams[i];
+                if (program >= 0) {
+                    if (p->id != program)
+                        continue;
+                }
 
-            if (in_stream->codec == NULL) continue;
-            if (stream_map[i] < 0) continue;
-            if (in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-                trk_stream = i;
-                break;
-            }
-        }
-    }
-
-    if (trk_stream < 0)
-        printf("WARNING, no tracking stream\n");
-
-    if (!(ofmt->flags & AVFMT_NOFILE)) {
-        ret = avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE);
-        if (ret < 0) {
-            fprintf(stderr, "Could not open output file '%s'", out_filename);
-            goto end;
-        }
-    }
-
-//  av_dict_set(&mp4_dict, "movflags", "faststart", 0);
-    av_dict_set(&mp4_dict, "chunk_duration", "30", 0);
-
-    ret = avformat_write_header(ofmt_ctx, &mp4_dict);
-    if (ret < 0) {
-        fprintf(stderr, "Error occurred when opening output file\n");
-        goto end;
-    }
-
-    av_dump_format(ofmt_ctx, 0, out_filename, 1);
-
-	/* soft break on CTRL+C */
-	signal(SIGINT,sigma);
-	signal(SIGHUP,sigma);
-	signal(SIGQUIT,sigma);
-	signal(SIGTERM,sigma);
-
-    /* if there are programs, set the timestamps from the minimum of all streams in the programs (mpegts) */
-    {
-        unsigned int pi;
-
-        for (pi=0;pi < ifmt_ctx->nb_programs;pi++) {
-            int64_t min_start = AV_NOPTS_VALUE;
-            AVProgram *p = ifmt_ctx->programs[pi];
-            unsigned int sii;
-
-            if (program >= 0) {
-                if (p->id != program)
-                    continue;
-            }
-
-            for (sii=0;sii < p->nb_stream_indexes;sii++) {
-                unsigned int si = p->stream_index[sii];
-                if (si < ifmt_ctx->nb_streams) {
-                    if (ifmt_ctx->streams[si]->start_time != AV_NOPTS_VALUE) {
-                        if (min_start == AV_NOPTS_VALUE || min_start > ifmt_ctx->streams[si]->start_time)
-                            min_start = ifmt_ctx->streams[si]->start_time;
+                for (sii=0;sii < p->nb_stream_indexes;sii++) {
+                    unsigned int si = p->stream_index[sii];
+                    if (si < ifmt_ctx->nb_streams) {
+                        if (ifmt_ctx->streams[si]->start_time != AV_NOPTS_VALUE) {
+                            if (min_start == AV_NOPTS_VALUE || min_start > ifmt_ctx->streams[si]->start_time)
+                                min_start = ifmt_ctx->streams[si]->start_time;
+                        }
                     }
+                }
+
+                if (min_start != AV_NOPTS_VALUE) {
+                    for (sii=0;sii < p->nb_stream_indexes;sii++) {
+                        unsigned int si = p->stream_index[sii];
+                        if (si < ifmt_ctx->nb_streams)
+                            stream_start[si] = min_start;
+                    }
+                }
+            }
+        }
+
+        /* set a timestamp baseline from the start times of all streams */
+        {
+            int64_t min_start = AV_NOPTS_VALUE;
+
+            for (i=0;i < ifmt_ctx->nb_streams;i++) {
+                if (ifmt_ctx->streams[i]->start_time != AV_NOPTS_VALUE) {
+                    if (min_start == AV_NOPTS_VALUE || min_start > ifmt_ctx->streams[i]->start_time)
+                        min_start = ifmt_ctx->streams[i]->start_time;
                 }
             }
 
             if (min_start != AV_NOPTS_VALUE) {
-                for (sii=0;sii < p->nb_stream_indexes;sii++) {
-                    unsigned int si = p->stream_index[sii];
-                    if (si < ifmt_ctx->nb_streams)
-                        stream_start[si] = min_start;
+                for (i=0;i < ifmt_ctx->nb_streams;i++) {
+                    if (stream_start[i] == AV_NOPTS_VALUE)
+                        stream_start[i] = min_start;
                 }
             }
         }
-    }
 
-    /* set a timestamp baseline from the start times of all streams */
-    {
-        int64_t min_start = AV_NOPTS_VALUE;
-
+        /* if that didn't work, just set it to zero which effectively copies at least the first packet timestamp */
         for (i=0;i < ifmt_ctx->nb_streams;i++) {
-            if (ifmt_ctx->streams[i]->start_time != AV_NOPTS_VALUE) {
-                if (min_start == AV_NOPTS_VALUE || min_start > ifmt_ctx->streams[i]->start_time)
-                    min_start = ifmt_ctx->streams[i]->start_time;
-            }
+            if (stream_start[i] == AV_NOPTS_VALUE)
+                stream_start[i] = 0;
         }
 
-        if (min_start != AV_NOPTS_VALUE) {
-            for (i=0;i < ifmt_ctx->nb_streams;i++) {
-                if (stream_start[i] == AV_NOPTS_VALUE)
-                    stream_start[i] = min_start;
+        fprintf(stderr,"Stream starts:\n");
+        for (i=0;i < ifmt_ctx->nb_streams;i++)
+            fprintf(stderr," #%d: %lld\n",i,(signed long long)stream_start[i]);
+
+        fprintf(stderr,"Stream mapping (i->o):\n");
+        for (i=0;i < ifmt_ctx->nb_streams;i++)
+            fprintf(stderr," #%d to #%d\n",i,stream_map[i]);
+
+        fprintf(stderr,"%d input streams, %d output streams\n",
+                ifmt_ctx->nb_streams,
+                ofmt_ctx->nb_streams);
+
+        /* track the initial stream count NOW because mpegts will add onto it later! */
+        ifmt_ctx_lock_nb_streams = ifmt_ctx->nb_streams;
+
+        while (!DIE) {
+            AVStream *in_stream, *out_stream;
+
+            ret = av_read_frame(ifmt_ctx, &pkt);
+            if (ret < 0)
+                break;
+
+            /* NTS: The mpegts demuxer can and will add streams during reading (as it finds them).
+             *      If we blindly use the stream index we will cause a segfault
+             *      writing to an output stream that does not exist! Range check for sanity! */
+            if (pkt.stream_index >= ifmt_ctx_lock_nb_streams)
+                continue;
+
+            if (stream_wait_key[pkt.stream_index]) {
+                if (!(pkt.flags & AV_PKT_FLAG_KEY)) {
+                    av_packet_unref(&pkt);
+                    continue;
+                }
+
+                stream_wait_key[pkt.stream_index] = false;
             }
-        }
-    }
 
-    /* if that didn't work, just set it to zero which effectively copies at least the first packet timestamp */
-    for (i=0;i < ifmt_ctx->nb_streams;i++) {
-        if (stream_start[i] == AV_NOPTS_VALUE)
-            stream_start[i] = 0;
-    }
-
-    fprintf(stderr,"Stream starts:\n");
-    for (i=0;i < ifmt_ctx->nb_streams;i++)
-        fprintf(stderr," #%d: %lld\n",i,(signed long long)stream_start[i]);
-
-    fprintf(stderr,"Stream mapping (i->o):\n");
-    for (i=0;i < ifmt_ctx->nb_streams;i++)
-        fprintf(stderr," #%d to #%d\n",i,stream_map[i]);
-
-    fprintf(stderr,"%d input streams, %d output streams\n",
-        ifmt_ctx->nb_streams,
-        ofmt_ctx->nb_streams);
-
-    /* track the initial stream count NOW because mpegts will add onto it later! */
-    ifmt_ctx_lock_nb_streams = ifmt_ctx->nb_streams;
-
-    while (!DIE) {
-        AVStream *in_stream, *out_stream;
-
-        ret = av_read_frame(ifmt_ctx, &pkt);
-        if (ret < 0)
-            break;
-
-        /* NTS: The mpegts demuxer can and will add streams during reading (as it finds them).
-         *      If we blindly use the stream index we will cause a segfault
-         *      writing to an output stream that does not exist! Range check for sanity! */
-        if (pkt.stream_index >= ifmt_ctx_lock_nb_streams)
-            continue;
-
-        if (stream_wait_key[pkt.stream_index]) {
-            if (!(pkt.flags & AV_PKT_FLAG_KEY)) {
+            int out_stream_index = stream_map[pkt.stream_index];
+            if (out_stream_index < 0) {
                 av_packet_unref(&pkt);
                 continue;
             }
 
-            stream_wait_key[pkt.stream_index] = false;
-        }
+            if (out_stream_index >= ofmt_ctx->nb_streams) {
+                fprintf(stderr,"Output stream index out of range! %d >= %d\n",out_stream_index,ofmt_ctx->nb_streams);
+                fprintf(stderr,"From input stream index %d out of %d total\n",pkt.stream_index,ifmt_ctx->nb_streams);
+                abort();
+            }
 
-        int out_stream_index = stream_map[pkt.stream_index];
-        if (out_stream_index < 0) {
-            av_packet_unref(&pkt);
-            continue;
-        }
+            in_stream  = ifmt_ctx->streams[pkt.stream_index];
+            out_stream = ofmt_ctx->streams[out_stream_index];
 
-        if (out_stream_index >= ofmt_ctx->nb_streams) {
-            fprintf(stderr,"Output stream index out of range! %d >= %d\n",out_stream_index,ofmt_ctx->nb_streams);
-            fprintf(stderr,"From input stream index %d out of %d total\n",pkt.stream_index,ifmt_ctx->nb_streams);
-            abort();
-        }
+            int64_t ts = AV_NOPTS_VALUE;
+            int64_t pts_dts_delta = 0;
+            int64_t too_far_forward = (int64_t)((60.0 * in_stream->time_base.den) / in_stream->time_base.num);
 
-        in_stream  = ifmt_ctx->streams[pkt.stream_index];
-        out_stream = ofmt_ctx->streams[out_stream_index];
+            if (pkt.dts != AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE)
+                pts_dts_delta = pkt.pts - pkt.dts;
 
-        int64_t ts = AV_NOPTS_VALUE;
-        int64_t pts_dts_delta = 0;
-        int64_t too_far_forward = (int64_t)((60.0 * in_stream->time_base.den) / in_stream->time_base.num);
+            if (pkt.dts != AV_NOPTS_VALUE)
+                ts = pkt.dts;
 
-        if (pkt.dts != AV_NOPTS_VALUE && pkt.pts != AV_NOPTS_VALUE)
-            pts_dts_delta = pkt.pts - pkt.dts;
+            if (ts == AV_NOPTS_VALUE || ts == pts_prev[pkt.stream_index]) {
+                if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE)
+                    ts = pts_prev[pkt.stream_index] + pts_prevdur[pkt.stream_index];
+            }
 
-        if (pkt.dts != AV_NOPTS_VALUE)
-            ts = pkt.dts;
+            if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
+                if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
+                    pts_final[pkt.stream_index] = 0;
 
-        if (ts == AV_NOPTS_VALUE || ts == pts_prev[pkt.stream_index]) {
-            if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE)
-                ts = pts_prev[pkt.stream_index] + pts_prevdur[pkt.stream_index];
-        }
-
-        if (pts_prev[pkt.stream_index] != AV_NOPTS_VALUE) {
-            if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
-                pts_final[pkt.stream_index] = 0;
-
-            if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index] && ts < (pts_prev[pkt.stream_index] + too_far_forward)) {
-                pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
+                if (ts != AV_NOPTS_VALUE && ts >= pts_prev[pkt.stream_index] && ts < (pts_prev[pkt.stream_index] + too_far_forward)) {
+                    pts_final[pkt.stream_index] += (ts - pts_prev[pkt.stream_index]);
+                    pts_finaladd[pkt.stream_index] = 0;
+                    pts_prev[pkt.stream_index] = ts;
+                }
+                else {
+                    pts_finaladd[pkt.stream_index] += pts_prevdur[pkt.stream_index];
+                }
+            }
+            else if (ts != AV_NOPTS_VALUE && pts_final[pkt.stream_index] == AV_NOPTS_VALUE) {
+                pts_final[pkt.stream_index] = ts - stream_start[pkt.stream_index];
                 pts_finaladd[pkt.stream_index] = 0;
                 pts_prev[pkt.stream_index] = ts;
             }
             else {
+                if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
+                    pts_final[pkt.stream_index] = 0;
+
                 pts_finaladd[pkt.stream_index] += pts_prevdur[pkt.stream_index];
             }
-        }
-        else if (ts != AV_NOPTS_VALUE && pts_final[pkt.stream_index] == AV_NOPTS_VALUE) {
-            pts_final[pkt.stream_index] = ts - stream_start[pkt.stream_index];
-            pts_finaladd[pkt.stream_index] = 0;
-            pts_prev[pkt.stream_index] = ts;
-        }
-        else {
-            if (pts_final[pkt.stream_index] == AV_NOPTS_VALUE)
-                pts_final[pkt.stream_index] = 0;
 
-            pts_finaladd[pkt.stream_index] += pts_prevdur[pkt.stream_index];
-        }
+            pts_prevdur[pkt.stream_index] = pkt.duration;
 
-        pts_prevdur[pkt.stream_index] = pkt.duration;
+            log_packet(ifmt_ctx, &pkt, "in");
 
-        log_packet(ifmt_ctx, &pkt, "in");
+            /* adjust time */
+            pkt.dts = pts_final[pkt.stream_index] + pts_finaladd[pkt.stream_index];
+            if (pkt.pts != AV_NOPTS_VALUE)
+                pkt.pts = pkt.dts + pts_dts_delta;
 
-        /* adjust time */
-        pkt.dts = pts_final[pkt.stream_index] + pts_finaladd[pkt.stream_index];
-        if (pkt.pts != AV_NOPTS_VALUE)
-            pkt.pts = pkt.dts + pts_dts_delta;
+            /* copy packet */
+            pkt.stream_index = out_stream_index;
+            pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
+            pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
+            pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
+            pkt.pos = -1;
 
-        /* copy packet */
-        pkt.stream_index = out_stream_index;
-        pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
-        pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
-        pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
-        pkt.pos = -1;
+            log_packet(ofmt_ctx, &pkt, "out");
 
-        log_packet(ofmt_ctx, &pkt, "out");
-
-        ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
-        if (ret < 0) {
-            fprintf(stderr, "Error muxing packet\n");
+            ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
+            if (ret < 0) {
+                fprintf(stderr, "Error muxing packet\n");
+                av_packet_unref(&pkt);
+                continue;
+            }
             av_packet_unref(&pkt);
-            continue;
         }
-        av_packet_unref(&pkt);
-    }
 
-    av_write_trailer(ofmt_ctx);
+        av_write_trailer(ofmt_ctx);
+    }
 end:
 
     avformat_close_input(&ifmt_ctx);
