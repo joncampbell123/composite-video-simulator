@@ -53,7 +53,7 @@ int                         src_fd = -1;
 bool            use_422_colorspace = true;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
-int		output_height = 480;
+int		output_height = 525;
 bool        input_ntsc = false;
 bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
@@ -66,6 +66,48 @@ static const double         one_frame_time =   sample_rate / (30000.00 / 1001.00
 static const double         one_scanline_time = one_frame_time / 525;               /* one scanline */
 static const unsigned int   one_scanline_raw_length = (unsigned int)(one_scanline_time + 0.5);
 
+std::vector<uint8_t>                input_samples;
+std::vector<uint8_t>::iterator      input_samples_read,input_samples_end;
+
+size_t count_src() {
+    assert(input_samples_read <= input_samples_end);
+    return (input_samples_end - input_samples_read);
+}
+
+void flush_src() {
+    assert(input_samples_read <= input_samples_end);
+    if (input_samples_read != input_samples.begin()) {
+        size_t move = input_samples_read - input_samples.begin();
+        assert(move != 0);
+        size_t todo = input_samples_end - input_samples_read;
+        if (todo > 0) memmove(&(*input_samples.begin()),&(*input_samples_read),todo);
+        input_samples_read -= move;
+        assert(input_samples_read == input_samples.begin());
+        input_samples_end -= move;
+    }
+}
+
+void refill_src() {
+    if (src_fd >= 0) {
+        assert(input_samples_read <= input_samples_end);
+        if (input_samples_end < input_samples.end()) {
+            size_t todo = input_samples.end() - input_samples_end;
+            assert(todo <= input_samples.size());
+            int rd = read(src_fd,&(*input_samples_end),todo);
+            if (rd > 0) {
+                assert((size_t)rd <= todo);
+                input_samples_end += (size_t)rd;
+                assert(input_samples_end <= input_samples.end());
+            }
+        }
+    }
+}
+
+void lazy_flush_src() {
+    if (input_samples_read > (input_samples.begin()+(input_samples.size()/2u))) flush_src();
+    refill_src();
+}
+
 bool open_src() {
     while (src_fd < 0) {
         if (src_composite.empty()) return false;
@@ -76,6 +118,8 @@ bool open_src() {
         src_fd = open(path.c_str(),O_RDONLY);
     }
 
+    input_samples.resize(one_scanline_raw_length*2048);
+    input_samples_read = input_samples_end = input_samples.begin();
     return true;
 }
 
@@ -89,8 +133,6 @@ void close_src() {
 #define RGBTRIPLET(r,g,b)       (((uint32_t)(r) << (uint32_t)16) + ((uint32_t)(g) << (uint32_t)8) + ((uint32_t)(b) << (uint32_t)0))
 
 AVFormatContext*	        output_avfmt = NULL;
-AVStream*		            output_avstream_audio = NULL;	// do not free
-AVCodecContext*		        output_avstream_audio_codec_context = NULL; // do not free
 AVStream*		            output_avstream_video = NULL;	// do not free
 AVCodecContext*		        output_avstream_video_codec_context = NULL; // do not free
 AVFrame*		            output_avstream_video_frame = NULL;         // ARGB
@@ -117,7 +159,7 @@ void preset_PAL() {
 void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
-	output_height = 480;
+	output_height = 525;
 	output_width = 720;
 	output_pal = false;
 	output_ntsc = true;
@@ -262,84 +304,6 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
-const unsigned int PRECISION = 1;
-
-void phosphor_dot(uint32_t *rasteremu,AVFrame *dstframe,double x,double y,double signal,double dot_radius) {
-    int ix,iy,xmin,xmax,ymax;
-    double dx,dy,fv;
-    uint32_t v;
-
-    if (signal < 0) signal = 0;
-    else if (signal > 32) signal = 32;
-    if (signal == 0) return;
-
-    // translate -1...1 x and y coordinates to screen
-    x += 1.0;
-    y += 1.0;
-    x = (x * dstframe->width) / 2;
-    y = (y * dstframe->height) / 2;
-
-    // phosphor dot brightness and radius
-    signal /= dot_radius;
-
-    // render it as a blob
-      iy = (int)floor(y - dot_radius);
-    ymax = (int)floor(y + dot_radius);
-    xmin = (int)floor(x - dot_radius);
-    xmax = (int)ceil(x + dot_radius);
-    while (iy <= ymax) {
-        for (ix = xmin;ix <= xmax;ix++) {
-            if (ix >= 0 && ix < dstframe->width && iy >= 0 && iy < dstframe->height) {
-                dx = ix - x;
-                dy = iy - y;
-                fv = signal * ((dot_radius - sqrt((dx*dx)+(dy*dy))) / dot_radius);
-                if (fv <= 0) continue;
-                v = (uint32_t)(fv * 255);
-                rasteremu[(iy*dstframe->width)+ix] += v;
-            }
-        }
-
-        iy++;
-    }
-}
-
-unsigned long long pixelstep = 0;
-
-// this is the magic function that you modify per rendering job to do your raster-warping magic
-void scanimate_modify_raster(double &sx,double &sy,double &dot_radius,double &signal,const unsigned int field,const unsigned long long fieldno,const double frame_t) {
-    // modify here
-    unsigned int ef_field;
-    unsigned int effect;
-    double ef_t;
-
-    effect = (fieldno / (60 * 3));
-    ef_field = fieldno - (effect * (60 * 3));
-    effect %= 4;
-
-    switch (effect) {
-        case 3: // sin wave "diffuse"
-            ef_t = sin(((double)ef_field * M_PI * 2) / (59.94 * 1));
-            sx += sin(frame_t * M_PI * 2 * 6) * ef_t * 0.1;
-            sy += cos(frame_t * M_PI * 2 * 6) * ef_t * 0.1;
-            break;
-        case 1: // vertical "rotate"
-            ef_t = (double)ef_field / (60 * 3);
-            sy *= (1.0 - (ef_t * 2.0));
-            signal *= fabs(1.0 - (ef_t * 2.0));
-            break;
-        case 2: // vertical stretch out
-            ef_t = (double)ef_field / (60 * 3);
-            sy *= (1.0 + (ef_t * 12));
-            break;
-        case 0: // trapezoid effect
-            ef_t = (double)ef_field / (60 * 3);
-            sx *= ((((sy + 1.0) / 2.0) * (1.0 - ef_t)) + ef_t);
-            signal *= ((((sy + 1.0) / 2.0) * (1.0 - ef_t)) + ef_t);
-            break;
-    }
-    // end modify here
-}
-
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fieldno) {
     double sx,sy,tx,ty;
@@ -356,6 +320,31 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     if (dstframe == NULL) return;
     if (dstframe->data[0] == NULL) return;
     if (dstframe->linesize[0] < (dstframe->width*4)) return; // ARGB
+
+    for (y=0;y < dstframe->height;y++) {
+        lazy_flush_src();
+        if (count_src() < one_scanline_raw_length) break;
+
+        uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
+        for (x=0;x < dstframe->width;x++) {
+            size_t si = x * 2;
+            if ((input_samples_read+si) > input_samples_end) break;
+            int r,g,b;
+            int Y = input_samples_read[si];
+
+            r = g = b = Y;
+            if (r < 0) r = 0;
+            if (g < 0) g = 0;
+            if (b < 0) b = 0;
+            if (r > 255) r = 255;
+            if (g > 255) g = 255;
+            if (b > 255) b = 255;
+
+            dst[x] = (r + (g << 8) + (b << 16) + 0xFF000000);
+        }
+
+        input_samples_read += one_scanline_raw_length;
+    }
 }
 
 int main(int argc,char **argv) {
@@ -386,39 +375,6 @@ int main(int argc,char **argv) {
     }
 
 	{
-		output_avstream_audio = avformat_new_stream(output_avfmt, NULL);
-		if (output_avstream_audio == NULL) {
-			fprintf(stderr,"Unable to create output audio stream\n");
-			return 1;
-		}
-
-		output_avstream_audio_codec_context = output_avstream_audio->codec;
-		if (output_avstream_audio_codec_context == NULL) {
-			fprintf(stderr,"Output stream audio no codec context?\n");
-			return 1;
-		}
-
-		if (output_audio_channels == 2)
-			output_avstream_audio_codec_context->channel_layout = AV_CH_LAYOUT_STEREO;
-		else
-			output_avstream_audio_codec_context->channel_layout = AV_CH_LAYOUT_MONO;
-
-		output_avstream_audio_codec_context->sample_rate = output_audio_rate;
-		output_avstream_audio_codec_context->channels = output_audio_channels;
-		output_avstream_audio_codec_context->sample_fmt = AV_SAMPLE_FMT_S16;
-		output_avstream_audio_codec_context->time_base = (AVRational){1, output_audio_rate};
-		output_avstream_audio->time_base = output_avstream_audio_codec_context->time_base;
-
-		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
-			output_avstream_audio_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-		if (avcodec_open2(output_avstream_audio_codec_context,avcodec_find_encoder(AV_CODEC_ID_PCM_S16LE),NULL) < 0) {
-			fprintf(stderr,"Output stream cannot open codec\n");
-			return 1;
-		}
-	}
-
-	{
 		output_avstream_video = avformat_new_stream(output_avfmt, NULL);
 		if (output_avstream_video == NULL) {
 			fprintf(stderr,"Unable to create output video stream\n");
@@ -440,6 +396,7 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
 		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num};
+        output_avstream_video_codec_context->bit_rate = 15000000;
 
 		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
 		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
@@ -521,38 +478,41 @@ int main(int argc,char **argv) {
     /* run all inputs and render to output, until done */
     {
         bool eof,copyaud;
-        signed long long upto=0;
         signed long long current=0;
 
         do {
             if (DIE) break;
 
-            while (current < upto) {
-                memset(output_avstream_video_frame->data[0],0,output_avstream_video_frame->linesize[0]*output_avstream_video_frame->height);
-
-                // composite the layer, keying against the color. all code assumes ARGB
-                composite_layer(output_avstream_video_frame,(current & 1) ^ 1,current);
-
-                // convert ARGB to whatever the codec demands, and encode
-                output_avstream_video_encode_frame->pts = output_avstream_video_frame->pts;
-                output_avstream_video_encode_frame->pkt_pts = output_avstream_video_frame->pkt_pts;
-                output_avstream_video_encode_frame->pkt_dts = output_avstream_video_frame->pkt_dts;
-                output_avstream_video_encode_frame->top_field_first = output_avstream_video_frame->top_field_first;
-                output_avstream_video_encode_frame->interlaced_frame = output_avstream_video_frame->interlaced_frame;
-
-                if (sws_scale(output_avstream_video_resampler,
-                            // source
-                            output_avstream_video_frame->data,
-                            output_avstream_video_frame->linesize,
-                            0,output_avstream_video_frame->height,
-                            // dest
-                            output_avstream_video_encode_frame->data,
-                            output_avstream_video_encode_frame->linesize) <= 0)
-                    fprintf(stderr,"WARNING: sws_scale failed\n");
-
-                output_frame(output_avstream_video_encode_frame,current);
-                current++;
+            refill_src();
+            if (count_src() < one_scanline_raw_length) {
+                close_src();
+                if (!open_src()) break;
             }
+
+            memset(output_avstream_video_frame->data[0],0,output_avstream_video_frame->linesize[0]*output_avstream_video_frame->height);
+
+            // composite the layer, keying against the color. all code assumes ARGB
+            composite_layer(output_avstream_video_frame,(current & 1) ^ 1,current);
+
+            // convert ARGB to whatever the codec demands, and encode
+            output_avstream_video_encode_frame->pts = output_avstream_video_frame->pts;
+            output_avstream_video_encode_frame->pkt_pts = output_avstream_video_frame->pkt_pts;
+            output_avstream_video_encode_frame->pkt_dts = output_avstream_video_frame->pkt_dts;
+            output_avstream_video_encode_frame->top_field_first = output_avstream_video_frame->top_field_first;
+            output_avstream_video_encode_frame->interlaced_frame = output_avstream_video_frame->interlaced_frame;
+
+            if (sws_scale(output_avstream_video_resampler,
+                        // source
+                        output_avstream_video_frame->data,
+                        output_avstream_video_frame->linesize,
+                        0,output_avstream_video_frame->height,
+                        // dest
+                        output_avstream_video_encode_frame->data,
+                        output_avstream_video_encode_frame->linesize) <= 0)
+                fprintf(stderr,"WARNING: sws_scale failed\n");
+
+            output_frame(output_avstream_video_encode_frame,current);
+            current++;
         } while (!eof);
     }
 
