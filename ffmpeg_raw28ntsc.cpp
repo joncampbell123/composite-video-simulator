@@ -108,6 +108,10 @@ void lazy_flush_src() {
     refill_src();
 }
 
+void rewind_src() {
+    if (src_fd >= 0) lseek(src_fd,0,SEEK_SET);
+}
+
 bool open_src() {
     while (src_fd < 0) {
         if (src_composite.empty()) return false;
