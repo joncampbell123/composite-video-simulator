@@ -363,7 +363,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             if (g > 255) g = 255;
             if (b > 255) b = 255;
 
-            dst[x] = (r + (g << 8) + (b << 16) + 0xFF000000);
+            dst[x] = RGBTRIPLET(r,g,b);
         }
 
         {
