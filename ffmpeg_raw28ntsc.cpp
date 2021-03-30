@@ -424,6 +424,33 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             break;
         }
 
+        /* what threshhold constitutes sync pulses can vary, apparently.
+         * So scan for the lowest value below 128 within two scan line periods and then determine a sync pulse threshhold from that */
+        {
+            int width = 16;
+            int low = 128,avg = 128*width;
+            for (size_t i=0;i < (one_scanline_raw_length*2);i++) {
+                /* use an average, so that we don't lose sync over intermittent noise */
+                if (i >= width)
+                    avg -= input_samples_read[i-width];
+                else
+                    avg -= 128;
+
+                avg += input_samples_read[i];
+
+                int av = avg / width;
+                if (low > av) low = av;
+            }
+
+            if (low < 128) {
+                int newsync = low + 16;
+                syncsep.blanking = ((syncsep.blanking * 15) + newsync + 8) / 16;
+                syncsep.pedastal = ((syncsep.pedastal * 15) + newsync + 8 + 8) / 16;
+                int newwhite = low + 112;
+                syncsep.whitepoint = ((syncsep.whitepoint * 15) + newwhite + 8) / 16;
+            }
+        }
+
         /* locate hsync */
         {
             syncpulse_t h;
@@ -489,7 +516,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     if (syncdiv > 0) sync /= syncdiv;
 
                     if (syncdiv > 0 && blankdiv > 0 && sync < blank) {
-                        syncsep.pedastal = ((syncsep.pedastal * 15) + blank + 8) / 16;
+                        syncsep.pedastal = ((syncsep.pedastal * 1) + blank + 1) / 2;
                     }
 
 #if 0
