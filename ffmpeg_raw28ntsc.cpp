@@ -445,8 +445,8 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     fprintf(stderr,"hsync\n");
 #endif
 
-                    /* horizontal sync */
-                    int px = (int)(one_scanline_raw_length * (1.0 - (0.075/2.0)));
+                    /* horizontal sync, align to left edge so vsync and equalizer pulses can scan correctly */
+                    int px = (int)(one_scanline_raw_length * (1.0 + (0.075/2.0))) - 2;
                     if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
                     int dev = center - px;
 
@@ -515,7 +515,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
         for (x=0;x < dstframe->width;x++) {
             size_t si = x * 2;
             int r,g,b;
-            int Y = int_scanline[si];
+            int Y = (int_scanline[si] + int_scanline[si+1] + 1) / 2;
 
             r = g = b = Y;
             if (r < 0) r = 0;
