@@ -427,7 +427,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
         /* what threshhold constitutes sync pulses can vary, apparently.
          * So scan for the lowest value below 128 within two scan line periods and then determine a sync pulse threshhold from that */
         {
-            int width = 16;
+            int width = 64;
             int low = 128,avg = 128*width;
             for (size_t i=0;i < (one_scanline_raw_length*2);i++) {
                 /* use an average, so that we don't lose sync over intermittent noise */
@@ -444,10 +444,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
             if (low < 128) {
                 int newsync = low + 16;
-                syncsep.blanking = ((syncsep.blanking * 15) + newsync + 8) / 16;
-                syncsep.pedastal = ((syncsep.pedastal * 15) + newsync + 8 + 8) / 16;
-                int newwhite = low + 112;
-                syncsep.whitepoint = ((syncsep.whitepoint * 15) + newwhite + 8) / 16;
+                syncsep.blanking = ((syncsep.blanking * 31) + newsync + 16) / 32;
             }
         }
 
@@ -501,6 +498,15 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     int blank = 0,blankdiv = 0;
                     int sync = 0,syncdiv = 0;
 
+                    {
+                        int avg = 0;
+                        for (size_t i=0;i < one_scanline_raw_length;i++)
+                            avg += input_samples_read[i];
+
+                        avg /= one_scanline_raw_length;
+                        syncsep.blanking = (syncsep.blanking + avg + 1) / 2;
+                    }
+
                     for (int x=h.start;x < (h.start+(int)(one_scanline_raw_length * 0.055));x++) {
                         if (input_samples_read[x] >= syncsep.blanking) {
                             blank += input_samples_read[x];
@@ -516,7 +522,9 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     if (syncdiv > 0) sync /= syncdiv;
 
                     if (syncdiv > 0 && blankdiv > 0 && sync < blank) {
-                        syncsep.pedastal = ((syncsep.pedastal * 1) + blank + 1) / 2;
+                        syncsep.pedastal = ((syncsep.pedastal * 3) + blank + 2) / 4;
+                        int nwhite = sync + (int)((blank - sync) * 4.0);
+                        syncsep.whitepoint = ((syncsep.whitepoint * 3) + nwhite + 2) / 4;
                     }
 
 #if 0
