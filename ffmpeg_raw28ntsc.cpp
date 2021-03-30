@@ -563,6 +563,8 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 adj++;
             }
             input_samples_read += adj;
+            if (input_samples_read > input_samples_end)
+                input_samples_read = input_samples_end;
         }
     }
 
@@ -574,6 +576,8 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             adj++;
         }
         input_samples_read += adj;
+        if (input_samples_read > input_samples_end)
+            input_samples_read = input_samples_end;
     }
 }
 
