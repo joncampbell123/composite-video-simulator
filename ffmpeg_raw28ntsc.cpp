@@ -135,7 +135,14 @@ bool open_src() {
         std::string path = src_composite.front();
         src_composite.pop_front();
 
-        src_fd = open(path.c_str(),O_RDONLY);
+        if (path == "-") { // STDIN
+            src_fd = dup(0/*STDIN*/);
+            close(0/*STDIN*/);
+            if (src_fd < 0) return false;
+        }
+        else {
+            src_fd = open(path.c_str(),O_RDONLY);
+        }
     }
 
     input_samples.resize(one_scanline_raw_length*2048);
