@@ -504,7 +504,7 @@ double vsync_proc(double v) {
         v = vsync_detect[i].lowpass(v);
 
     if (vsync_level > v) {
-        const double a = 1.0 / (one_scanline_time * 0.5);
+        const double a = 1.0 / (one_scanline_time * 0.075);
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
     }
     else {
@@ -585,7 +585,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             hsync_proc(int_scanline[i]);
 
             if (vsync_count >= one_scanline_width) {
-                const double a = 1.0 / (one_scanline_width * 0.25);
+                const double a = 1.0 / (one_scanline_width * 0.075);
                 sync_level = (sync_level * (1.0 - a)) + (vsync_level * a);
                 hsync_level = (vsync_level * (1.0 - 0.5)) + (vsync_level * 0.5);
             }
@@ -659,7 +659,7 @@ int main(int argc,char **argv) {
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
     for (size_t i=0;i < vsync_detect_passes;i++)
-        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 6.0));
+        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 2.0));
 
     for (size_t i=0;i < hsync_detect_passes;i++)
         hsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075));
