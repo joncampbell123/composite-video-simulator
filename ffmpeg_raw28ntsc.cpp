@@ -489,7 +489,7 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 
 #define                     vsync_detect_passes     (3)
 LowpassFilter               vsync_detect[3];
-double                      vsync_level = 128.0;
+double                      vsync_level = 16.0;
 
 double vsync_proc(double v) {
     for (size_t i=0;i < vsync_detect_passes;i++)
@@ -500,7 +500,7 @@ double vsync_proc(double v) {
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
     }
     else {
-        const double a = 1.0 / one_frame_time;
+        const double a = 1.0 / (sample_rate * 0.01); /* 10ms */
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
     }
 
