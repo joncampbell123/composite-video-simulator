@@ -10,6 +10,7 @@ bin_PROGRAMS = \
 	ffmpeg_average_delay \
 	ffmpeg_colormap \
 	ffmpeg_scanimate \
+	ffmpeg_raw28ntsc_step1 \
 	ffmpeg_raw28ntsc \
 	ffmpeg_cassette \
 	frameblend \
@@ -40,6 +41,10 @@ ffmpeg_scanimate_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCA
 ffmpeg_raw28ntsc_SOURCES = ffmpeg_raw28ntsc.cpp
 ffmpeg_raw28ntsc_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
 ffmpeg_raw28ntsc_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
+
+ffmpeg_raw28ntsc_step1_SOURCES = ffmpeg_raw28ntsc_step1.cpp
+ffmpeg_raw28ntsc_step1_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
+ffmpeg_raw28ntsc_step1_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
 
 ffmpeg_colorkey_SOURCES = ffmpeg_colorkey.cpp
 ffmpeg_colorkey_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
