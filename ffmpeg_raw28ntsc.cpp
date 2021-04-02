@@ -491,17 +491,37 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 LowpassFilter               vsync_detect[3];
 double                      vsync_level = 16.0;
 
+#define                     hsync_detect_passes     (3)
+LowpassFilter               hsync_detect[3];
+double                      hsync_level = 16.0;
+
 double vsync_proc(double v) {
     for (size_t i=0;i < vsync_detect_passes;i++)
         v = vsync_detect[i].lowpass(v);
 
     if (vsync_level > v) {
-        const double a = 1.0 / one_scanline_time;
+        const double a = 1.0 / (one_scanline_time * 0.5);
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
     }
     else {
-        const double a = 1.0 / (sample_rate * 0.01); /* 10ms */
+        const double a = 1.0 / (one_frame_time * 0.5);
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
+    }
+
+    return v;
+}
+
+double hsync_proc(double v) {
+    for (size_t i=0;i < hsync_detect_passes;i++)
+        v = hsync_detect[i].lowpass(v);
+
+    if (hsync_level > v) {
+        const double a = (1.0 - 0.075) / one_scanline_time;
+        hsync_level = (hsync_level * (1.0 - a)) + (v * a);
+    }
+    else {
+        const double a = 0.075 / one_scanline_time;
+        hsync_level = (hsync_level * (1.0 - a)) + (v * a);
     }
 
     return v;
@@ -529,14 +549,6 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     double fieldt = ((double)fieldno * output_field_rate.den) / output_field_rate.num;
     double filet = (double)total_count_src() / sample_rate;
 
-    /* vsync detect, look ahead */
-    lazy_flush_src();
-    refill_src();
-
-    if (count_src() >= (one_scanline_raw_length*264)) {
-
-    }
-
     for (y=0;y < (dstframe->height-repeat_scanline);y++) {
         lazy_flush_src();
         if (count_src() < (one_scanline_raw_length*4)) {
@@ -554,9 +566,12 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 int_scanline[x] = ((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8;
         }
 
-        for (int i=0;i < one_scanline_raw_length;i++) {
+        for (int i=0;i < one_scanline_raw_length;i++)
             vsync_proc(int_scanline[i]);
-            int_scanline[i] -= vsync_level;
+
+        for (int i=0;i < one_scanline_raw_length;i++) {
+            hsync_proc(int_scanline[i]);
+            int_scanline[i] -= hsync_level;
         }
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
@@ -626,6 +641,9 @@ int main(int argc,char **argv) {
 
     for (size_t i=0;i < vsync_detect_passes;i++)
         vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 6.0));
+
+    for (size_t i=0;i < hsync_detect_passes;i++)
+        hsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075));
 
     if (!open_src()) {
         fprintf(stderr,"Failed to open src\n");
