@@ -324,77 +324,6 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
-/* sync separator and detection */
-struct syncsep_t {
-    int                     blanking;
-    int                     pedastal;
-    int                     whitepoint;
-
-    unsigned int            pixels_since_hsync;
-    unsigned int            pixels_since_vsync;
-    unsigned int            lines_since_vsync;
-
-    syncsep_t() :
-        blanking(64),   /* I'd choose 24 but my VCR's "blue background" has an extra bright sync pulse */
-        pedastal(64),   /* NTSC pedastal */
-        whitepoint(235) /* what "100% white" is */
-    {
-        reset_hsync_counter();
-        reset_vsync_counter();
-        /* don't worry, sync separation and vsync pulse handling of the "equalization pulses" should adjust these automatically */
-    }
-
-    void reset_hsync_counter() {
-        pixels_since_hsync = 0;
-    }
-    void reset_vsync_counter() {
-        pixels_since_vsync = 0;
-        lines_since_vsync = 0;
-    }
-};
-
-struct syncpulse_t {
-    int                     start;
-    int                     end;
-    int                     level;
-
-    syncpulse_t() : start(-1), end(-1), level(-1) { }
-    bool detected() const {
-        return (start < end);
-    }
-};
-
-syncsep_t           syncsep;
-
-void sync_detect(syncpulse_t &result,const syncsep_t &syncsep,std::vector<uint8_t>::iterator input_samples_read,std::vector<uint8_t>::iterator input_samples_end,unsigned int start,unsigned int end,unsigned int min_sync,unsigned int max_sync) {
-    int count = 0;
-    unsigned int x = start;
-    result.start = result.end = -1;
-
-    while (x < end) {
-        if (input_samples_read[x] < syncsep.blanking) {
-            if (count == 0)
-                result.start = x;
-
-            count++;
-        }
-        else {
-            if (count >= min_sync && count <= max_sync) {
-                result.end = x;
-                result.level = 0;
-                for (int y=result.start;y < result.end;y++) result.level += input_samples_read[y];
-                result.level /= (result.end - result.start);
-                break;
-            }
-
-            result.start = -1;
-            count = 0;
-        }
-
-        x++;
-    }
-}
-
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fieldno) {
     int consume_scanline=0;
@@ -424,116 +353,6 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             break;
         }
 
-        /* what threshhold constitutes sync pulses can vary, apparently.
-         * So scan for the lowest value below 128 within two scan line periods and then determine a sync pulse threshhold from that */
-        {
-            int width = 64;
-            int low = 128,avg = 128*width;
-            for (size_t i=0;i < (one_scanline_raw_length*2);i++) {
-                /* use an average, so that we don't lose sync over intermittent noise */
-                if (i >= width)
-                    avg -= input_samples_read[i-width];
-                else
-                    avg -= 128;
-
-                avg += input_samples_read[i];
-
-                int av = avg / width;
-                if (low > av) low = av;
-            }
-
-            if (low < 128) {
-                int newsync = low + 16;
-                syncsep.blanking = ((syncsep.blanking * 31) + newsync + 16) / 32;
-            }
-        }
-
-        /* locate hsync */
-        {
-            syncpulse_t h;
-
-            /* sync pulse should be 0.075H +/- 0.005H. These constraints are needed to detect only hsync, not vsync.
-             * equalizing pulses should be 0.04H, vertical sync pulse should be 0.43H (0.5H - 0.07H) */
-            sync_detect(/*&*/h,syncsep,input_samples_read,input_samples_end,/*start*/(int)(one_scanline_raw_length * 0.08),/*end*/(int)(one_scanline_raw_length * 1.2),
-                /* sync min */(int)(one_scanline_raw_length * 0.03),/* sync max */(int)(one_scanline_raw_length * 0.45));
-#if 0
-            fprintf(stderr,"sync h: det=%u start=%d end=%d level=%d dist=%.3fH\n",
-                h.detected(),h.start,h.end,h.level,(double)(h.end-h.start) / one_scanline_raw_length);
-#endif
-
-            if (h.detected()) {
-                int center = (h.start+h.end)/2;
-                int dist = (h.end-h.start);
-                if (dist >= (int)(one_scanline_raw_length * 0.070) && dist <= (int)(one_scanline_raw_length * 0.080)) {
-#if 0
-                    fprintf(stderr,"hsync\n");
-#endif
-
-                    /* horizontal sync, align to left edge so vsync and equalizer pulses can scan correctly */
-                    int px = (int)(one_scanline_raw_length * (1.0 + (0.075/2.0))) - 2;
-                    if (center < (int)(one_scanline_raw_length * 0.5)) center += one_scanline_raw_length;
-                    int dev = center - px;
-
-                    one_scanline_width = one_scanline_raw_length + (((double)dev * dist * 0.3) / one_scanline_raw_length);
-                }
-                else if (dist >= (int)(one_scanline_raw_length * 0.29/*FIXME: What? Should be 0.43H*/)) {
-#if 0
-                    fprintf(stderr,"vsync\n");
-#endif
-
-                    /* vertical sync */
-                    int fy = y % (dstframe->height/2);
-                    if (fy != 0) {
-                        if (fy < (dstframe->height/4)) {
-                            /* one extra scanline needs to be consumed to shift up the image */
-                            consume_scanline++;
-                        }
-                        else {
-                            repeat_scanline++;
-                        }
-                    }
-                }
-                else if (dist >= (int)(one_scanline_raw_length * 0.025/*FIXME: What? Should be 0.04H*/) && dist <= (int)(one_scanline_raw_length * 0.055)) {
-                    /* equalizing pulses. the non-sync pulses are the reference blanking level */
-                    int blank = 0,blankdiv = 0;
-                    int sync = 0,syncdiv = 0;
-
-                    {
-                        int avg = 0;
-                        for (size_t i=0;i < one_scanline_raw_length;i++)
-                            avg += input_samples_read[i];
-
-                        avg /= one_scanline_raw_length;
-                        syncsep.blanking = (syncsep.blanking + avg + 1) / 2;
-                    }
-
-                    for (int x=h.start;x < (h.start+(int)(one_scanline_raw_length * 0.055));x++) {
-                        if (input_samples_read[x] >= syncsep.blanking) {
-                            blank += input_samples_read[x];
-                            blankdiv++;
-                        }
-                        else {
-                            sync += input_samples_read[x];
-                            syncdiv++;
-                        }
-                    }
-
-                    if (blankdiv > 0) blank /= blankdiv;
-                    if (syncdiv > 0) sync /= syncdiv;
-
-                    if (syncdiv > 0 && blankdiv > 0 && sync < blank) {
-                        syncsep.pedastal = ((syncsep.pedastal * 3) + blank + 2) / 4;
-                        int nwhite = sync + (int)((blank - sync) * 4.0);
-                        syncsep.whitepoint = ((syncsep.whitepoint * 3) + nwhite + 2) / 4;
-                    }
-
-#if 0
-                    fprintf(stderr,"equ blank=%d sync=%d\n",blank,sync);
-#endif
-                }
-            }
-        }
-
         /* use interpolation because our concept of "one scanline" isn't exactly an integer.
          * without interpolation, adjustment can be a bit jagged. */
         {
@@ -542,7 +361,9 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             if (a > 256) a = 256;
             for (x=0;x < (one_scanline_raw_length+16);x++) {
                 int v = ((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8;
-                int_scanline[x] = ((v - syncsep.pedastal) * 255) / (syncsep.whitepoint - syncsep.pedastal);
+                if (v < 0) v = 0;
+                if (v > 255) v = 255;
+                int_scanline[x] = v;
             }
         }
 
