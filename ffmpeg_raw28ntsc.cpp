@@ -490,10 +490,12 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 #define                     vsync_detect_passes     (3)
 LowpassFilter               vsync_detect[3];
 double                      vsync_level = 16.0;
+int                         vsync_count = 0;
 
 #define                     hsync_detect_passes     (3)
 LowpassFilter               hsync_detect[3];
 double                      hsync_level = 16.0;
+int                         hsync_count = 0;
 
 double                      sync_level = 16.0;
 
@@ -510,6 +512,11 @@ double vsync_proc(double v) {
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
     }
 
+    if (v < (vsync_level + 1.0))
+        vsync_count++;
+    else
+        vsync_count = 0;
+
     return v;
 }
 
@@ -525,6 +532,11 @@ double hsync_proc(double v) {
         const double a = 0.075 / one_scanline_time;
         hsync_level = (hsync_level * (1.0 - a)) + (v * a);
     }
+
+    if (v < (hsync_level + 1.0))
+        hsync_count++;
+    else
+        hsync_count = 0;
 
     return v;
 }
@@ -571,10 +583,15 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
         for (int i=0;i < one_scanline_raw_length;i++) {
             vsync_proc(int_scanline[i]);
             hsync_proc(int_scanline[i]);
-        }
 
-        for (int i=0;i < one_scanline_raw_length;i++)
+            if (vsync_count >= one_scanline_width) {
+                const double a = 1.0 / (one_scanline_width * 0.25);
+                sync_level = (sync_level * (1.0 - a)) + (vsync_level * a);
+                hsync_level = (vsync_level * (1.0 - 0.5)) + (vsync_level * 0.5);
+            }
+
             int_scanline[i] -= sync_level;
+        }
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
         for (x=0;x < dstframe->width;x++) {
