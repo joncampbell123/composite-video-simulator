@@ -222,6 +222,8 @@ static double           sample_rate = 0;
 static double           one_frame_time = 0;
 static double           one_scanline_time = 0;
 static unsigned int     one_scanline_raw_length = 0;
+static double           one_scanline_width = 0;
+static double           one_scanline_width_err = 0;
 
 void NTSC28MHz() {
     sample_rate =               ((315000000.00 * 8.0) / 88.00);        /* 315/88 * MHz = about 28.636363 MHz */
@@ -236,10 +238,9 @@ void compute_NTSC() {
     one_frame_time =            sample_rate / (30000.00 / 1001.00);  /* 30000/1001 = about 29.97 */
     one_scanline_time =         one_frame_time / 525.00;            /* one scanline */
     one_scanline_raw_length =   (unsigned int)(one_scanline_time + 0.5);
+    one_scanline_width =        one_scanline_raw_length;
+    one_scanline_width_err =    0;
 }
-
-double                      one_scanline_width = one_scanline_time + 0.0499;
-double                      one_scanline_width_err = 0;
 
 signed int                  int_scanline[4096];
 
