@@ -637,7 +637,7 @@ int main(int argc,char **argv) {
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
     for (size_t i=0;i < vsync_detect_passes;i++) {
-        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 2.0));
+        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time / 1.5));
         for (size_t j=0;j < one_frame_time;j++) vsync_detect[i].lowpass(128);
     }
 
