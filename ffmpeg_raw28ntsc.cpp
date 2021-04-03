@@ -216,6 +216,7 @@ bool		output_ntsc = true;	// NTSC color subcarrier emulation
 bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
+string	sratep = "ntsc28";
 
 static double           subcarrier_freq = 0;
 static double           sample_rate = 0;
@@ -225,21 +226,25 @@ static unsigned int     one_scanline_raw_length = 0;
 static double           one_scanline_width = 0;
 static double           one_scanline_width_err = 0;
 
+void NTSCAnyMHz(const char *str) {
+	sample_rate =				atof(str);
+}
+
 void NTSC28MHz() {
-    sample_rate =               ((315000000.00 * 8.0) / 88.00);        /* 315/88 * MHz = about 28.636363 MHz */
+	sample_rate =				((315000000.00 * 8.0) / 88.00);        /* 315/88 * MHz = about 28.636363 MHz */
 }
 
 void Do40MHz() {
-    sample_rate =               40000000.00;                           /* 40MHz */
+	sample_rate =				40000000.00;                           /* 40MHz */
 }
 
 void compute_NTSC() {
-    subcarrier_freq =           315000000.00 / 88.00;                   /* 315/88MHz or about 3.5795454...MHz */
-    one_frame_time =            sample_rate / (30000.00 / 1001.00);  /* 30000/1001 = about 29.97 */
-    one_scanline_time =         one_frame_time / 525.00;            /* one scanline */
-    one_scanline_raw_length =   (unsigned int)(one_scanline_time + 0.5);
-    one_scanline_width =        one_scanline_raw_length;
-    one_scanline_width_err =    0;
+	subcarrier_freq =			315000000.00 / 88.00;                   /* 315/88MHz or about 3.5795454...MHz */
+	one_frame_time =			sample_rate / (30000.00 / 1001.00);  /* 30000/1001 = about 29.97 */
+	one_scanline_time =			one_frame_time / 525.00;            /* one scanline */
+	one_scanline_raw_length =	(unsigned int)(one_scanline_time + 0.5);
+	one_scanline_width =		one_scanline_raw_length;
+	one_scanline_width_err =	0;
 }
 
 signed int                  int_scanline[4096];
@@ -359,7 +364,7 @@ void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
 	output_height = 262;
-	output_width = 910;
+	output_width = ((one_scanline_raw_length / 2) + 1) & (~1);
 	output_pal = false;
 	output_ntsc = true;
 }
@@ -386,6 +391,7 @@ static void help(const char *arg0) {
 	fprintf(stderr,"%s [options]\n",arg0);
 	fprintf(stderr," -i <input file>               you can specify more than one input file, in order of layering\n");
 	fprintf(stderr," -o <output file>\n");
+	fprintf(stderr," -s <rate>                     ntsc28, 40mhz\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -401,6 +407,11 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help")) {
 				help(argv[0]);
 				return 1;
+            }
+            else if (!strcmp(a,"s")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                sratep = a;
             }
             else if (!strcmp(a,"width")) {
                 a = argv[i++];
@@ -427,26 +438,6 @@ static int parse_argv(int argc,char **argv) {
             else if (!strcmp(a,"inntsc")) {
                 input_ntsc = true;
             }
-			else if (!strcmp(a,"tvstd")) {
-				a = argv[i++];
-
-				if (!strcmp(a,"pal")) {
-					preset_PAL();
-				}
-				else if (!strcmp(a,"ntsc")) {
-					preset_NTSC();
-				}
-                else if (!strcmp(a,"720p60")) {
-                    preset_720p60();
-                }
-                else if (!strcmp(a,"1080p60")) {
-                    preset_1080p60();
-                }
-                else {
-					fprintf(stderr,"Unknown tv std '%s'\n",a);
-					return 1;
-				}
-			}
 			else {
 				fprintf(stderr,"Unknown switch '%s'\n",a);
 				return 1;
@@ -653,7 +644,6 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 }
 
 int main(int argc,char **argv) {
-    preset_NTSC();
     if (parse_argv(argc,argv))
 		return 1;
 
@@ -668,8 +658,18 @@ int main(int argc,char **argv) {
 		return 1;
 	}
 
-    NTSC28MHz();
+    if (sratep == "ntsc28")
+        NTSC28MHz();
+    else if (sratep == "40mhz")
+        Do40MHz();
+    else if (!sratep.empty() && isdigit(sratep[0]))
+        NTSCAnyMHz(sratep.c_str());
+    else {
+        fprintf(stderr,"Unknown -s preset '%s'\n",sratep.c_str());
+        NTSC28MHz();
+    }
     compute_NTSC();
+    preset_NTSC();
 
     fprintf(stderr,"Subcarrier:             %.3f\n",subcarrier_freq);
     fprintf(stderr,"Sample rate:            %.3f\n",sample_rate);
