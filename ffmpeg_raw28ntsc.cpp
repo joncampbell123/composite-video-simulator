@@ -503,8 +503,7 @@ double vsync_proc(double v) {
         v = vsync_detect[i].lowpass(v);
 
     if (vsync_level > v) {
-        const double a = 1.0 / (one_scanline_time * 0.075);
-        vsync_level = (vsync_level * (1.0 - a)) + (v * a);
+        vsync_level = v; // lowpass filter already smooths it out
     }
     else {
         const double a = 1.0 / one_frame_time;
