@@ -506,7 +506,7 @@ double vsync_proc(double v) {
         vsync_level = v; // lowpass filter already smooths it out
     }
     else {
-        const double a = 1.0 / one_frame_time;
+        const double a = 1.0 / (one_frame_time * 0.6);
         vsync_level = (vsync_level * (1.0 - a)) + (v * a);
     }
 
@@ -636,7 +636,7 @@ int main(int argc,char **argv) {
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
     for (size_t i=0;i < vsync_detect_passes;i++) {
-        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time / 1.5));
+        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075 * 0.75));
         for (size_t j=0;j < one_frame_time;j++) vsync_detect[i].lowpass(128);
     }
 
