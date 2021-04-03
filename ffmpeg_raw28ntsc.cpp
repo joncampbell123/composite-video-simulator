@@ -217,11 +217,26 @@ bool		output_pal = false;	// PAL color subcarrier emulation
 int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
 int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
 
-static const double         subcarrier_freq = (315000000.00        / 88.00);        /* 315/88 MHz = about 3.57954 MHz */
-static const double         sample_rate =    ((315000000.00 * 8.0) / 88.00);        /* 315/88 * MHz = about 28.636363 MHz */
-static const double         one_frame_time =   sample_rate / (30000.00 / 1001.00);  /* 30000/1001 = about 29.97 */
-static const double         one_scanline_time = one_frame_time / 525.00;            /* one scanline */
-static const unsigned int   one_scanline_raw_length = (unsigned int)(one_scanline_time + 0.5);
+static double           subcarrier_freq = 0;
+static double           sample_rate = 0;
+static double           one_frame_time = 0;
+static double           one_scanline_time = 0;
+static unsigned int     one_scanline_raw_length = 0;
+
+void NTSC28MHz() {
+    sample_rate =               ((315000000.00 * 8.0) / 88.00);        /* 315/88 * MHz = about 28.636363 MHz */
+}
+
+void Do40MHz() {
+    sample_rate =               40000000.00;                           /* 40MHz */
+}
+
+void compute_NTSC() {
+    subcarrier_freq =           315000000.00 / 88.00;                   /* 315/88MHz or about 3.5795454...MHz */
+    one_frame_time =            sample_rate / (30000.00 / 1001.00);  /* 30000/1001 = about 29.97 */
+    one_scanline_time =         one_frame_time / 525.00;            /* one scanline */
+    one_scanline_raw_length =   (unsigned int)(one_scanline_time + 0.5);
+}
 
 double                      one_scanline_width = one_scanline_time + 0.0499;
 double                      one_scanline_width_err = 0;
@@ -652,9 +667,13 @@ int main(int argc,char **argv) {
 		return 1;
 	}
 
+    NTSC28MHz();
+    compute_NTSC();
+
     fprintf(stderr,"Subcarrier:             %.3f\n",subcarrier_freq);
     fprintf(stderr,"Sample rate:            %.3f\n",sample_rate);
     fprintf(stderr,"One frame duration:     %.3f (%.3fHz)\n",one_frame_time,sample_rate / one_frame_time);
+    fprintf(stderr,"One field duration:     %.3f (%.3fHz)\n",one_frame_time / 2.0,sample_rate / (one_frame_time / 2.0));
     fprintf(stderr,"One scanline duration:  %.3f (%.3fHz)\n",one_scanline_time,sample_rate / one_scanline_time);
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
