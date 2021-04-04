@@ -518,6 +518,8 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 LowpassFilter               hsync_dc_detect[3];
 double                      hsync_dc_level = 128.0;
 
+uint8_t                     sync_threshhold = 24;
+
 oneprocsamp hsync_dc_proc(oneprocsamp v) {
     double lv = v.raw;
 
@@ -556,8 +558,6 @@ void do_filter_new_input(oneprocsamp *samples,int count) {
 
 // This code assumes ARGB and the frame match resolution/
 void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fieldno) {
-    int consume_scanline=0;
-    int repeat_scanline=0;
     double sx,sy,tx,ty;
     unsigned int dx,dy;
     unsigned int ystep;
@@ -576,62 +576,92 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     double fieldt = ((double)fieldno * output_field_rate.den) / output_field_rate.num;
     double filet = (double)total_count_src() / sample_rate;
 
-    for (y=0;y < (dstframe->height-repeat_scanline);y++) {
-        lazy_flush_src();
-        if (count_src() < (one_scanline_raw_length*4)) {
-            empty_src();
-            break;
-        }
+    /* look for vsync. We're using the hsync_dc_raw which is the lowpass filtered version of the video signal. */
+    lazy_flush_src();
+    refill_src();
 
-        /* use interpolation because our concept of "one scanline" isn't exactly an integer.
-         * without interpolation, adjustment can be a bit jagged. */
-        {
-            int a = (int)floor(one_scanline_width_err * 256);
-            if (a < 0) a = 0;
-            if (a > 256) a = 256;
-            for (x=0;x < (one_scanline_raw_length+16);x++)
-                int_scanline[x] = ((input_samples_read[x].raw * (256 - a)) + (input_samples_read[x+1].raw * a)) >> 8;
-        }
+    {
+        vector<oneprocsamp>::iterator i = input_samples_read,last_pulse = input_samples_read;
+        int vsb_count = 0;
 
-        uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
-        for (x=0;x < dstframe->width;x++) {
-            int r,g,b;
-            int Y = int_scanline[x];
+        while (i < input_samples_end) {
+            while (i < input_samples_end && (*i).hsync_dc_raw >= sync_threshhold) i++;
+            vector<oneprocsamp>::iterator si = i;
+            while (i < input_samples_end && (*i).hsync_dc_raw < sync_threshhold) i++;
+            vector<oneprocsamp>::iterator ei = i;
 
-            r = g = b = Y;
-            if (r < 0) r = 0;
-            if (g < 0) g = 0;
-            if (b < 0) b = 0;
-            if (r > 255) r = 255;
-            if (g > 255) g = 255;
-            if (b > 255) b = 255;
+            size_t synclen = (size_t)(ei-si);
 
-            dst[x] = RGBTRIPLET(r,g,b);
-        }
-
-        {
-            unsigned int adj = floor(one_scanline_width);
-            one_scanline_width_err += one_scanline_width - adj;
-            if (one_scanline_width_err >= 1.0) {
-                one_scanline_width_err -= 1.0;
-                adj++;
+            if (synclen >= (int)(one_scanline_raw_length * 0.35)) { /* vertical sync pulse (0.5H - 0.07H) */
+                i = si + (int)(one_scanline_raw_length * 0.40);
+                if (i < ei) i = ei;
+                vsb_count++;
             }
-            input_samples_read += adj;
-            if (input_samples_read > input_samples_end)
-                input_samples_read = input_samples_end;
+            else if (synclen >= (int)(one_scanline_raw_length * 0.100)) { /* junk */
+            }
+            else if (synclen >= (int)(one_scanline_raw_length * 0.065)) { /* hsync pulse */
+                if (vsb_count >= (3*3)) {
+                    input_samples_read = si;
+                    i = si + (int)(one_scanline_raw_length * 0.40);
+                    if (i < ei) i = ei;
+                    break;
+                }
+            }
+            else if (synclen >= (int)(one_scanline_raw_length * 0.045)) { /* junk */
+            }
+            else if (synclen >= (int)(one_scanline_raw_length * 0.020)) { /* equalization pulse */
+                i = si + (int)(one_scanline_raw_length * 0.40);
+                if (i < ei) i = ei;
+                vsb_count++;
+            }
+
+            last_pulse = si;
         }
     }
 
-    if (consume_scanline > 0) {
-        unsigned int adj = floor(one_scanline_width);
-        one_scanline_width_err += one_scanline_width - adj;
-        if (one_scanline_width_err >= 1.0) {
-            one_scanline_width_err -= 1.0;
-            adj++;
+    {
+        vector<oneprocsamp>::iterator input_scan = input_samples_read;
+
+        /* render normally */
+        for (y=0;y < dstframe->height && (input_scan+(one_scanline_raw_length*2)) < input_samples_end;y++) {
+            /* use interpolation because our concept of "one scanline" isn't exactly an integer.
+             * without interpolation, adjustment can be a bit jagged. */
+            {
+                int a = (int)floor(one_scanline_width_err * 256);
+                if (a < 0) a = 0;
+                if (a > 256) a = 256;
+                for (x=0;x < (one_scanline_raw_length+16);x++)
+                    int_scanline[x] = ((input_scan[x].raw * (256 - a)) + (input_scan[x+1].raw * a)) >> 8;
+            }
+
+            uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
+            for (x=0;x < dstframe->width;x++) {
+                int r,g,b;
+                int Y = int_scanline[x];
+
+                r = g = b = Y;
+                if (r < 0) r = 0;
+                if (g < 0) g = 0;
+                if (b < 0) b = 0;
+                if (r > 255) r = 255;
+                if (g > 255) g = 255;
+                if (b > 255) b = 255;
+
+                dst[x] = RGBTRIPLET(r,g,b);
+            }
+
+            {
+                unsigned int adj = floor(one_scanline_width);
+                one_scanline_width_err += one_scanline_width - adj;
+                if (one_scanline_width_err >= 1.0) {
+                    one_scanline_width_err -= 1.0;
+                    adj++;
+                }
+                input_scan += adj;
+                if (input_scan > input_samples_end)
+                    input_scan = input_samples_end;
+            }
         }
-        input_samples_read += adj;
-        if (input_samples_read > input_samples_end)
-            input_samples_read = input_samples_end;
     }
 }
 
