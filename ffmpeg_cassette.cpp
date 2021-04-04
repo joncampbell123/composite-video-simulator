@@ -1,6 +1,7 @@
 // recreate hiss, warble, L-R temporal distortions as if recorded to audio cassette
 
 #define __STDC_CONSTANT_MACROS
+#define __STDC_LIMIT_MACROS
 
 #include <sys/types.h>
 #include <signal.h>

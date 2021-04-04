@@ -19,6 +19,7 @@
 // At some point, this code should do PROPER processing in the NTSC YIQ colorspace instead of using the YUV colorspace to fake it.
 
 #define __STDC_CONSTANT_MACROS
+#define __STDC_LIMIT_MACROS
 
 #include <sys/types.h>
 #include <signal.h>

@@ -1,5 +1,6 @@
 
 #define __STDC_CONSTANT_MACROS
+#define __STDC_LIMIT_MACROS
 
 #include <sys/types.h>
 #include <signal.h>

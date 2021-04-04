@@ -5,6 +5,7 @@
 //      bits, then run back through a DAC on the other side (well within the realm of 1980s/1990s hardware)
 
 #define __STDC_CONSTANT_MACROS
+#define __STDC_LIMIT_MACROS
 
 #include <sys/types.h>
 #include <signal.h>
