@@ -622,7 +622,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             }
             else if (synclen >= (int)(one_scanline_raw_length * 0.06)) { /* hsync pulse */
                 if (vsb_count >= (3*3)) {
-                    input_samples_read = si;
+                    input_samples_read = si + (synclen / 2); /* use the center of the pulse for stability */
                     i = si + (int)(one_scanline_raw_length * 0.3);
                     if (i < ei) i = ei;
                     break;
@@ -707,7 +707,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                         vsb_count++;
                     }
                     else if (synclen >= (int)(one_scanline_raw_length * 0.06)) { /* hsync pulse */
-                        input_scan = si;
+                        input_scan = si + (synclen / 2); /* use the center of the pulse for stability */
                         break;
                     }
                     else if (synclen >= (int)(one_scanline_raw_length * 0.02)) { /* equalization pulse */
