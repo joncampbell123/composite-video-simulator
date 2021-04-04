@@ -365,7 +365,7 @@ void preset_NTSC() {
 	output_field_rate.num = 60000;
 	output_field_rate.den = 1001;
 	output_height = 262;
-	output_width = ((one_scanline_raw_length / 2) + 1) & (~1);
+	output_width = (one_scanline_raw_length + 1) & (~1);
 	output_pal = false;
 	output_ntsc = true;
 }
@@ -562,9 +562,8 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
         for (x=0;x < dstframe->width;x++) {
-            size_t si = x * 2;
             int r,g,b;
-            int Y = (int_scanline[si] + int_scanline[si+1] + 1) / 2;
+            int Y = int_scanline[x];
 
             r = g = b = Y;
             if (r < 0) r = 0;
