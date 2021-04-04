@@ -615,25 +615,21 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
             size_t synclen = (size_t)(ei-si);
 
-            if (synclen >= (int)(one_scanline_raw_length * 0.35)) { /* vertical sync pulse (0.5H - 0.07H) */
-                i = si + (int)(one_scanline_raw_length * 0.40);
+            if (synclen >= (int)(one_scanline_raw_length * 0.3)) { /* vertical sync pulse (0.5H - 0.07H) */
+                i = si + (int)(one_scanline_raw_length * 0.3);
                 if (i < ei) i = ei;
                 vsb_count++;
             }
-            else if (synclen >= (int)(one_scanline_raw_length * 0.100)) { /* junk */
-            }
-            else if (synclen >= (int)(one_scanline_raw_length * 0.065)) { /* hsync pulse */
+            else if (synclen >= (int)(one_scanline_raw_length * 0.06)) { /* hsync pulse */
                 if (vsb_count >= (3*3)) {
                     input_samples_read = si;
-                    i = si + (int)(one_scanline_raw_length * 0.40);
+                    i = si + (int)(one_scanline_raw_length * 0.3);
                     if (i < ei) i = ei;
                     break;
                 }
             }
-            else if (synclen >= (int)(one_scanline_raw_length * 0.045)) { /* junk */
-            }
-            else if (synclen >= (int)(one_scanline_raw_length * 0.020)) { /* equalization pulse */
-                i = si + (int)(one_scanline_raw_length * 0.40);
+            else if (synclen >= (int)(one_scanline_raw_length * 0.02)) { /* equalization pulse */
+                i = si + (int)(one_scanline_raw_length * 0.3);
                 if (i < ei) i = ei;
                 vsb_count++;
             }
@@ -705,23 +701,24 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
                     size_t synclen = (size_t)(ei-si);
 
-                    if (synclen >= (int)(one_scanline_raw_length * 0.35)) { /* vertical sync pulse (0.5H - 0.07H) */
-                        i = si + (int)(one_scanline_raw_length * 0.40);
+                    if (synclen >= (int)(one_scanline_raw_length * 0.3)) { /* vertical sync pulse (0.5H - 0.07H) */
+                        i = si + (int)(one_scanline_raw_length * 0.3);
                         if (i < ei) i = ei;
                         vsb_count++;
                     }
-                    else if (synclen >= (int)(one_scanline_raw_length * 0.100)) { /* junk */
-                    }
-                    else if (synclen >= (int)(one_scanline_raw_length * 0.065)) { /* hsync pulse */
+                    else if (synclen >= (int)(one_scanline_raw_length * 0.06)) { /* hsync pulse */
                         input_scan = si;
                         break;
                     }
-                    else if (synclen >= (int)(one_scanline_raw_length * 0.045)) { /* junk */
-                    }
-                    else if (synclen >= (int)(one_scanline_raw_length * 0.020)) { /* equalization pulse */
-                        i = si + (int)(one_scanline_raw_length * 0.40);
+                    else if (synclen >= (int)(one_scanline_raw_length * 0.02)) { /* equalization pulse */
+                        i = si + (int)(one_scanline_raw_length * 0.3);
                         if (i < ei) i = ei;
                         vsb_count++;
+                    }
+
+                    if (vsb_count >= (3*3)) {
+                        y = INT_MAX;
+                        break;
                     }
                 }
             }
