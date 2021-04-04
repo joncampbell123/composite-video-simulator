@@ -820,7 +820,7 @@ int main(int argc,char **argv) {
             if (DIE) break;
 
             refill_src();
-            if (count_src() < one_scanline_raw_length) {
+            if (count_src() < (one_scanline_raw_length*256)) {
                 close_src();
                 if (!open_src()) break;
             }
