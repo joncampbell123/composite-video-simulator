@@ -209,6 +209,7 @@ std::list<string>           src_composite;
 unsigned long long          src_byte_counter = 0; /* at beginning of input buffer */
 int                         src_fd = -1;
 
+bool            disable_sync = false;
 bool            use_422_colorspace = true;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
@@ -426,6 +427,9 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
             }
+            else if (!strcmp(a,"nosig")) {
+                disable_sync = true;
+            }
             else if (!strcmp(a,"s")) {
                 a = argv[i++];
                 if (a == NULL) return 1;
@@ -581,7 +585,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     lazy_flush_src();
     refill_src();
 
-    {
+    if (!disable_sync) {
         vector<oneprocsamp>::iterator i = input_samples_read,last_pulse = input_samples_read;
         int vsb_count = 0;
 
@@ -663,7 +667,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     input_scan = input_samples_end;
             }
 
-            {
+            if (!disable_sync) {
                 vector<oneprocsamp>::iterator i = input_scan;
                 int vsb_count = 0;
 
@@ -704,6 +708,9 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 }
             }
         }
+
+        if (disable_sync)
+            input_samples_read = input_scan;
     }
 }
 
