@@ -46,6 +46,7 @@ using namespace std;
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <algorithm>
 
 /* return a floating point value specifying what to scale the sample
  * value by to reduce it from full volume to dB decibels */
@@ -281,6 +282,8 @@ void flush_src() {
     }
 }
 
+void do_filter_new_input(uint8_t *samples,int count);
+
 void refill_src() {
     if (src_fd >= 0) {
         assert(input_samples_read <= input_samples_end);
@@ -289,6 +292,7 @@ void refill_src() {
             assert(todo <= input_samples.size());
             int rd = read(src_fd,&(*input_samples_end),todo);
             if (rd > 0) {
+                do_filter_new_input(&(*input_samples_end),rd);
                 assert((size_t)rd <= todo);
                 input_samples_end += (size_t)rd;
                 assert(input_samples_end <= input_samples.end());
@@ -502,18 +506,25 @@ LowpassFilter               hsync_dc_detect[3];
 double                      hsync_dc_level = 128.0;
 
 double hsync_dc_proc(double v) {
-    for (size_t i=0;i < hsync_dc_detect_passes;i++)
-        v = hsync_dc_detect[i].lowpass(v);
+    double lv = v;
 
-    if (hsync_dc_level > v) {
-        hsync_dc_level = v; // lowpass filter already smooths it out
+    for (size_t i=0;i < hsync_dc_detect_passes;i++)
+        lv = hsync_dc_detect[i].lowpass(lv);
+
+    if (hsync_dc_level > lv) {
+        hsync_dc_level = lv; // lowpass filter already smooths it out
     }
     else {
         const double a = 1.0 / (one_frame_time * 0.6);
-        hsync_dc_level = (hsync_dc_level * (1.0 - a)) + (v * a);
+        hsync_dc_level = (hsync_dc_level * (1.0 - a)) + (lv * a);
     }
 
-    return v;
+    return v - hsync_dc_level;
+}
+
+void do_filter_new_input(uint8_t *samples,int count) {
+    for (int i=0;i < count;i++)
+        samples[i] = (int)max(min(hsync_dc_proc(samples[i]),255.0),0.0);
 }
 
 // This code assumes ARGB and the frame match resolution/
@@ -553,11 +564,6 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             if (a > 256) a = 256;
             for (x=0;x < (one_scanline_raw_length+16);x++)
                 int_scanline[x] = ((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8;
-        }
-
-        for (int i=0;i < one_scanline_raw_length;i++) {
-            hsync_dc_proc(int_scanline[i]);
-            int_scanline[i] -= hsync_dc_level;
         }
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
