@@ -501,7 +501,7 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 LowpassFilter               hsync_dc_detect[3];
 double                      hsync_dc_level = 128.0;
 
-double vsync_proc(double v) {
+double hsync_dc_proc(double v) {
     for (size_t i=0;i < hsync_dc_detect_passes;i++)
         v = hsync_dc_detect[i].lowpass(v);
 
@@ -556,7 +556,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
         }
 
         for (int i=0;i < one_scanline_raw_length;i++) {
-            vsync_proc(int_scanline[i]);
+            hsync_dc_proc(int_scanline[i]);
             int_scanline[i] -= hsync_dc_level;
         }
 
