@@ -495,13 +495,15 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
-#define                     hsync_detect_passes     (3)
-LowpassFilter               hsync_detect[3];
+// From cxadc you can't assume specific sample values when detecting sync pulses,
+// so the first step is to "DC normalize" the samples using the hsync pulse detection.
+#define                     hsync_dc_detect_passes     (3)
+LowpassFilter               hsync_dc_detect[3];
 double                      vsync_level = 128.0;
 
 double vsync_proc(double v) {
-    for (size_t i=0;i < hsync_detect_passes;i++)
-        v = hsync_detect[i].lowpass(v);
+    for (size_t i=0;i < hsync_dc_detect_passes;i++)
+        v = hsync_dc_detect[i].lowpass(v);
 
     if (vsync_level > v) {
         vsync_level = v; // lowpass filter already smooths it out
@@ -636,9 +638,9 @@ int main(int argc,char **argv) {
     fprintf(stderr,"One scanline duration:  %.3f (%.3fHz)\n",one_scanline_time,sample_rate / one_scanline_time);
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
-    for (size_t i=0;i < hsync_detect_passes;i++) {
-        hsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075 * 0.75));
-        for (size_t j=0;j < one_frame_time;j++) hsync_detect[i].lowpass(128);
+    for (size_t i=0;i < hsync_dc_detect_passes;i++) {
+        hsync_dc_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075 * 0.75));
+        for (size_t j=0;j < one_frame_time;j++) hsync_dc_detect[i].lowpass(128);
     }
 
     if (!open_src()) {
