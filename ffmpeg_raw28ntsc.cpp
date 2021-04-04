@@ -249,10 +249,16 @@ void compute_NTSC() {
 	one_scanline_width_err =	0;
 }
 
-signed int                  int_scanline[4096];
+signed int                                  int_scanline[4096];
+unsigned char                               read_tmp[4096];
 
-std::vector<uint8_t>                input_samples;
-std::vector<uint8_t>::iterator      input_samples_read,input_samples_end;
+struct oneprocsamp {
+    uint8_t                                 raw;
+    uint8_t                                 hsync_dc_raw;
+};
+
+std::vector<oneprocsamp>                    input_samples;
+std::vector<oneprocsamp>::iterator          input_samples_read,input_samples_end;
 
 unsigned long long total_count_src() {
     return src_byte_counter + (input_samples_read - input_samples.begin());
@@ -275,28 +281,35 @@ void flush_src() {
         size_t move = input_samples_read - input_samples.begin();
         assert(move != 0);
         size_t todo = input_samples_end - input_samples_read;
-        if (todo > 0) memmove(&(*input_samples.begin()),&(*input_samples_read),todo);
+        if (todo > 0) memmove(&(*input_samples.begin()),&(*input_samples_read),todo*sizeof(oneprocsamp));
         input_samples_read -= move;
         assert(input_samples_read == input_samples.begin());
         input_samples_end -= move;
     }
 }
 
-void do_filter_new_input(uint8_t *samples,int count);
+void do_filter_new_input(oneprocsamp *samples,int count);
 
 void refill_src() {
     if (src_fd >= 0) {
         assert(input_samples_read <= input_samples_end);
-        if (input_samples_end < input_samples.end()) {
+        while (input_samples_end < input_samples.end()) {
             size_t todo = input_samples.end() - input_samples_end;
+            if (todo > sizeof(read_tmp)) todo = sizeof(read_tmp);
             assert(todo <= input_samples.size());
-            int rd = read(src_fd,&(*input_samples_end),todo);
+            assert(todo <= sizeof(read_tmp));
+            int rd = read(src_fd,read_tmp,todo);
             if (rd > 0) {
+                assert(rd <= todo);
+                for (int x=0;x < rd;x++)
+                    input_samples_end[x].raw = read_tmp[x];
+
                 do_filter_new_input(&(*input_samples_end),rd);
                 assert((size_t)rd <= todo);
                 input_samples_end += (size_t)rd;
                 assert(input_samples_end <= input_samples.end());
             }
+            if (rd < todo) break;
         }
     }
 }
@@ -505,8 +518,8 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 LowpassFilter               hsync_dc_detect[3];
 double                      hsync_dc_level = 128.0;
 
-double hsync_dc_proc(double v) {
-    double lv = v;
+oneprocsamp hsync_dc_proc(oneprocsamp v) {
+    double lv = v.raw;
 
     for (size_t i=0;i < hsync_dc_detect_passes;i++)
         lv = hsync_dc_detect[i].lowpass(lv);
@@ -519,12 +532,26 @@ double hsync_dc_proc(double v) {
         hsync_dc_level = (hsync_dc_level * (1.0 - a)) + (lv * a);
     }
 
-    return v - hsync_dc_level;
+    {
+        int x = v.raw - hsync_dc_level;
+        if (x < 0) x = 0;
+        if (x > 255) x = 255;
+        v.raw = (uint8_t)x;
+    }
+
+    {
+        int x = lv - hsync_dc_level;
+        if (x < 0) x = 0;
+        if (x > 255) x = 255;
+        v.hsync_dc_raw = (uint8_t)x;
+    }
+
+    return v;
 }
 
-void do_filter_new_input(uint8_t *samples,int count) {
+void do_filter_new_input(oneprocsamp *samples,int count) {
     for (int i=0;i < count;i++)
-        samples[i] = (int)max(min(hsync_dc_proc(samples[i]),255.0),0.0);
+        samples[i] = hsync_dc_proc(samples[i]);
 }
 
 // This code assumes ARGB and the frame match resolution/
@@ -563,7 +590,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             if (a < 0) a = 0;
             if (a > 256) a = 256;
             for (x=0;x < (one_scanline_raw_length+16);x++)
-                int_scanline[x] = ((input_samples_read[x] * (256 - a)) + (input_samples_read[x+1] * a)) >> 8;
+                int_scanline[x] = ((input_samples_read[x].raw * (256 - a)) + (input_samples_read[x+1].raw * a)) >> 8;
         }
 
         uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
