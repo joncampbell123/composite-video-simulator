@@ -577,6 +577,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
     double filet = (double)total_count_src() / sample_rate;
 
     /* look for vsync. We're using the hsync_dc_raw which is the lowpass filtered version of the video signal. */
+    one_scanline_width_err = 0;
     lazy_flush_src();
     refill_src();
 
@@ -660,6 +661,47 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 input_scan += adj;
                 if (input_scan > input_samples_end)
                     input_scan = input_samples_end;
+            }
+
+            {
+                vector<oneprocsamp>::iterator i = input_scan;
+                int vsb_count = 0;
+
+                if (i > input_samples_read) {
+                    size_t avail = (size_t)(i-input_samples_read);
+                    if (avail >= (one_scanline_raw_length * 0.1))
+                        avail  = (one_scanline_raw_length * 0.1);
+
+                    i -= avail;
+                }
+
+                while (i < input_samples_end) {
+                    while (i < input_samples_end && (*i).hsync_dc_raw >= sync_threshhold) i++;
+                    vector<oneprocsamp>::iterator si = i;
+                    while (i < input_samples_end && (*i).hsync_dc_raw < sync_threshhold) i++;
+                    vector<oneprocsamp>::iterator ei = i;
+
+                    size_t synclen = (size_t)(ei-si);
+
+                    if (synclen >= (int)(one_scanline_raw_length * 0.35)) { /* vertical sync pulse (0.5H - 0.07H) */
+                        i = si + (int)(one_scanline_raw_length * 0.40);
+                        if (i < ei) i = ei;
+                        vsb_count++;
+                    }
+                    else if (synclen >= (int)(one_scanline_raw_length * 0.100)) { /* junk */
+                    }
+                    else if (synclen >= (int)(one_scanline_raw_length * 0.065)) { /* hsync pulse */
+                        input_scan = si;
+                        break;
+                    }
+                    else if (synclen >= (int)(one_scanline_raw_length * 0.045)) { /* junk */
+                    }
+                    else if (synclen >= (int)(one_scanline_raw_length * 0.020)) { /* equalization pulse */
+                        i = si + (int)(one_scanline_raw_length * 0.40);
+                        if (i < ei) i = ei;
+                        vsb_count++;
+                    }
+                }
             }
         }
     }
