@@ -495,13 +495,13 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	av_packet_unref(&pkt);
 }
 
-#define                     vsync_detect_passes     (3)
-LowpassFilter               vsync_detect[3];
+#define                     hsync_detect_passes     (3)
+LowpassFilter               hsync_detect[3];
 double                      vsync_level = 128.0;
 
 double vsync_proc(double v) {
-    for (size_t i=0;i < vsync_detect_passes;i++)
-        v = vsync_detect[i].lowpass(v);
+    for (size_t i=0;i < hsync_detect_passes;i++)
+        v = hsync_detect[i].lowpass(v);
 
     if (vsync_level > v) {
         vsync_level = v; // lowpass filter already smooths it out
@@ -636,9 +636,9 @@ int main(int argc,char **argv) {
     fprintf(stderr,"One scanline duration:  %.3f (%.3fHz)\n",one_scanline_time,sample_rate / one_scanline_time);
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
-    for (size_t i=0;i < vsync_detect_passes;i++) {
-        vsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075 * 0.75));
-        for (size_t j=0;j < one_frame_time;j++) vsync_detect[i].lowpass(128);
+    for (size_t i=0;i < hsync_detect_passes;i++) {
+        hsync_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075 * 0.75));
+        for (size_t j=0;j < one_frame_time;j++) hsync_detect[i].lowpass(128);
     }
 
     if (!open_src()) {
