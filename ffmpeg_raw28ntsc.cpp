@@ -209,6 +209,7 @@ std::list<string>           src_composite;
 unsigned long long          src_byte_counter = 0; /* at beginning of input buffer */
 int                         src_fd = -1;
 
+bool            mark_sync = false;
 bool            disable_sync = false;
 bool            use_422_colorspace = true;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
@@ -427,6 +428,9 @@ static int parse_argv(int argc,char **argv) {
 				help(argv[0]);
 				return 1;
             }
+            else if (!strcmp(a,"marksig")) {
+                mark_sync = true;
+            }
             else if (!strcmp(a,"nosig")) {
                 disable_sync = true;
             }
@@ -551,6 +555,9 @@ oneprocsamp hsync_dc_proc(oneprocsamp v) {
         if (x > 255) x = 255;
         v.hsync_dc_raw = (uint8_t)x;
     }
+
+    if (mark_sync && v.hsync_dc_raw < sync_threshhold)
+        v.raw = 255;
 
     return v;
 }
