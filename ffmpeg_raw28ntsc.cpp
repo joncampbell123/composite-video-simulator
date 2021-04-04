@@ -525,6 +525,8 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 #define                     hsync_dc_detect_passes     (3)
 LowpassFilter               hsync_dc_detect[3];
 double                      hsync_dc_level = 128.0;
+vector<uint8_t>             hsync_dc_detect_delay;
+vector<uint8_t>::iterator   hsync_dc_detect_delay_i;
 
 uint8_t                     sync_threshhold = 24;
 
@@ -547,6 +549,15 @@ oneprocsamp hsync_dc_proc(oneprocsamp v) {
         if (x < 0) x = 0;
         if (x > 255) x = 255;
         v.raw = (uint8_t)x;
+
+        assert(hsync_dc_detect_delay_i >= hsync_dc_detect_delay.begin());
+        assert(hsync_dc_detect_delay_i < hsync_dc_detect_delay.end());
+        uint8_t ov = *hsync_dc_detect_delay_i;
+        *hsync_dc_detect_delay_i = v.raw;
+        v.raw = ov;
+        hsync_dc_detect_delay_i++;
+        if (hsync_dc_detect_delay_i >= hsync_dc_detect_delay.end())
+            hsync_dc_detect_delay_i  = hsync_dc_detect_delay.begin();
     }
 
     {
@@ -756,6 +767,10 @@ int main(int argc,char **argv) {
     fprintf(stderr,"One scanline duration:  %.3f (%.3fHz)\n",one_scanline_time,sample_rate / one_scanline_time);
     fprintf(stderr,"Raw render to:          %u\n",one_scanline_raw_length);
 
+    /* raw samples need to be delayed to match hsync detect, lowpass filtering has a delay effect */
+    hsync_dc_detect_delay.resize((size_t)((one_scanline_time * 0.075 * 0.75) * 0.5));
+    hsync_dc_detect_delay_i = hsync_dc_detect_delay.begin();
+    /* set up lowpass filter */
     for (size_t i=0;i < hsync_dc_detect_passes;i++) {
         hsync_dc_detect[i].setFilter(sample_rate,sample_rate / (one_scanline_time * 0.075 * 0.75));
         for (size_t j=0;j < one_frame_time;j++) hsync_dc_detect[i].lowpass(128);
