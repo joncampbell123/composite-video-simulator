@@ -529,6 +529,8 @@ vector<uint8_t>             hsync_dc_detect_delay;
 vector<uint8_t>::iterator   hsync_dc_detect_delay_i;
 
 uint8_t                     sync_threshhold = (uint8_t)(192 * 0.25 * 0.5);
+uint8_t                     blank_level = (uint8_t)0;
+uint8_t                     white_level = (uint8_t)192;
 
 oneprocsamp hsync_dc_proc(oneprocsamp v) {
     double lv = v.raw;
@@ -632,6 +634,35 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 i = si + (int)(one_scanline_raw_length * 0.3);
                 if (i < ei) i = ei;
                 vsb_count++;
+
+                /* use the values to calibrate the black level */
+                {
+                    vector<oneprocsamp>::iterator j = si;
+                    int mina = 0,mind = 0;
+                    int maxa = 0,maxd = 0;
+
+                    while (j < i) {
+                        if ((*j).hsync_dc_raw >= sync_threshhold) {
+                            maxa += (*j).hsync_dc_raw;
+                            maxd++;
+                        }
+                        else {
+                            mina += (*j).hsync_dc_raw;
+                            mind++;
+                        }
+
+                        j++;
+                    }
+
+                    if (mind > 0) mina /= mind;
+                    if (maxd > 0) maxa /= maxd;
+
+                    int nwhite = (uint8_t)min(max((int)(maxa + ((maxa - mina) / 0.25)),maxa+1),240);
+                    white_level = ((white_level * 7) + nwhite + 4) / 8;
+
+                    int nblack = maxa;
+                    blank_level = ((blank_level * 7) + nblack + 4) / 8;
+                }
             }
 
             last_pulse = si;
@@ -649,8 +680,14 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 int a = (int)floor(one_scanline_width_err * 256);
                 if (a < 0) a = 0;
                 if (a > 256) a = 256;
-                for (x=0;x < (one_scanline_raw_length+16);x++)
-                    int_scanline[x] = ((input_scan[x].raw * (256 - a)) + (input_scan[x+1].raw * a)) >> 8;
+                for (x=0;x < (one_scanline_raw_length+16);x++) {
+                    int v = ((input_scan[x].raw * (256 - a)) + (input_scan[x+1].raw * a)) >> 8;
+                    v -= blank_level;
+                    v = (v * 255) / (white_level - blank_level);
+                    if (v < 0) v = 0;
+                    if (v > 255) v = 255;
+                    int_scanline[x] = (uint8_t)v;
+                }
             }
 
             uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
