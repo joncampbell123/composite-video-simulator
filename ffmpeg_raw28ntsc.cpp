@@ -528,7 +528,7 @@ double                      hsync_dc_level = 128.0;
 vector<uint8_t>             hsync_dc_detect_delay;
 vector<uint8_t>::iterator   hsync_dc_detect_delay_i;
 
-uint8_t                     sync_threshhold = 24;
+uint8_t                     sync_threshhold = (uint8_t)(160 * 0.25 * 0.5);
 
 oneprocsamp hsync_dc_proc(oneprocsamp v) {
     double lv = v.raw;
