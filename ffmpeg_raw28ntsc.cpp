@@ -211,7 +211,9 @@ int                         src_fd = -1;
 
 bool            mark_sync = false;
 bool            disable_sync = false;
+bool            disable_wp_equ = false;
 bool            use_422_colorspace = true;
+bool            disable_equalization = false;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
 int		output_height = 480;
@@ -430,6 +432,12 @@ static int parse_argv(int argc,char **argv) {
             }
             else if (!strcmp(a,"marksig")) {
                 mark_sync = true;
+            }
+            else if (!strcmp(a,"noequ")) {
+                disable_equalization = true;
+            }
+            else if (!strcmp(a,"nowequ")) {
+                disable_wp_equ = true;
             }
             else if (!strcmp(a,"nosig")) {
                 disable_sync = true;
@@ -682,8 +690,12 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 if (a > 256) a = 256;
                 for (x=0;x < (one_scanline_raw_length+16);x++) {
                     int v = ((input_scan[x].raw * (256 - a)) + (input_scan[x+1].raw * a)) >> 8;
-                    v -= blank_level;
-                    v = (v * 255) / (white_level - blank_level);
+                    if (!disable_equalization) {
+                        v -= blank_level;
+                        if (!disable_wp_equ) {
+                            v = (v * 255) / (white_level - blank_level);
+                        }
+                    }
                     if (v < 0) v = 0;
                     if (v > 255) v = 255;
                     int_scanline[x] = (uint8_t)v;
