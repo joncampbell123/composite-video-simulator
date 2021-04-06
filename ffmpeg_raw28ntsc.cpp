@@ -212,6 +212,7 @@ int                         src_fd = -1;
 bool            mark_sync = false;
 bool            disable_sync = false;
 bool            disable_wp_equ = false;
+bool            show_subcarrier = false;
 bool            use_422_colorspace = true;
 bool            disable_subcarrier = false;
 bool            disable_equalization = false;
@@ -447,6 +448,9 @@ static int parse_argv(int argc,char **argv) {
             }
             else if (!strcmp(a,"nosc")) {
                 disable_subcarrier = true;
+            }
+            else if (!strcmp(a,"showsc")) {
+                show_subcarrier = true;
             }
             else if (!strcmp(a,"s")) {
                 a = argv[i++];
@@ -734,6 +738,9 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
             for (x=0;x < dstframe->width;x++) {
                 int r,g,b;
                 int Y = int_luma[x];
+
+                if (show_subcarrier)
+                    Y = int_chroma[x] + 128;
 
                 r = g = b = Y;
                 if (r < 0) r = 0;
