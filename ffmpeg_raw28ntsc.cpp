@@ -257,6 +257,7 @@ void compute_NTSC() {
 
 signed int                                  int_scanline[4096];
 signed int                                  int_chroma[4096];
+signed int                                  int_luma2[4096];
 signed int                                  int_luma[4096];
 unsigned char                               read_tmp[4096];
 
@@ -722,16 +723,18 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 /* 28.6MHz is exactly 8x the chroma subcarrier.
                  * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
                  * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
-                 * say, 40MHz.
+                 * say, 40MHz. Then lowpass a bit more to remove remaining subcarrier.
                  *
                  * Once luma is determined, subtract from original to get chroma subcarrier.
                  * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
                  * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
                  * fine details have color artifacts with composite video. */
-                for (x=0;x < (one_scanline_raw_length+16-4);x++) {
-                    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
+                for (x=0;x < (one_scanline_raw_length+16-4);x++)
+                    int_luma2[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
+                for (x=0;x < (one_scanline_raw_length+16-4);x++)
+                    int_luma[x] = (int_luma2[x] + int_luma2[x+1] + int_luma2[x+2] + int_luma2[x+3] + 2) / 4;
+                for (x=0;x < (one_scanline_raw_length+16-4);x++)
                     int_chroma[x] = int_scanline[x] - int_luma[x];
-                }
             }
 
             uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
