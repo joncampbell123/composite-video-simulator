@@ -213,6 +213,7 @@ bool            mark_sync = false;
 bool            disable_sync = false;
 bool            disable_wp_equ = false;
 bool            use_422_colorspace = true;
+bool            disable_subcarrier = false;
 bool            disable_equalization = false;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = 720;
@@ -443,6 +444,9 @@ static int parse_argv(int argc,char **argv) {
             }
             else if (!strcmp(a,"nosig")) {
                 disable_sync = true;
+            }
+            else if (!strcmp(a,"nosc")) {
+                disable_subcarrier = true;
             }
             else if (!strcmp(a,"s")) {
                 a = argv[i++];
@@ -704,18 +708,26 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 }
             }
 
-            /* 28.6MHz is exactly 8x the chroma subcarrier.
-             * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
-             * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
-             * say, 40MHz.
-             *
-             * Once luma is determined, subtract from original to get chroma subcarrier.
-             * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
-             * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
-             * fine details have color artifacts with composite video. */
-            for (x=0;x < one_scanline_raw_length;x++) {
-                int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
-                int_chroma[x] = int_scanline[x] - int_luma[x];
+            if (disable_subcarrier) {
+                for (x=0;x < (one_scanline_raw_length+16);x++) {
+                    int_luma[x] = int_scanline[x];
+                    int_chroma[x] = 0;
+                }
+            }
+            else {
+                /* 28.6MHz is exactly 8x the chroma subcarrier.
+                 * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
+                 * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
+                 * say, 40MHz.
+                 *
+                 * Once luma is determined, subtract from original to get chroma subcarrier.
+                 * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
+                 * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
+                 * fine details have color artifacts with composite video. */
+                for (x=0;x < (one_scanline_raw_length+16-4);x++) {
+                    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
+                    int_chroma[x] = int_scanline[x] - int_luma[x];
+                }
             }
 
             uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
