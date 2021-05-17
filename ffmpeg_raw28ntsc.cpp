@@ -257,7 +257,6 @@ void compute_NTSC() {
 
 signed int                                  int_scanline[4096];
 signed int                                  int_chroma[4096];
-signed int                                  int_luma2[4096];
 signed int                                  int_luma[4096];
 unsigned char                               read_tmp[4096];
 
@@ -731,9 +730,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                  * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
                  * fine details have color artifacts with composite video. */
                 for (x=0;x < (one_scanline_raw_length+16-4);x++)
-                    int_luma2[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
-                for (x=0;x < (one_scanline_raw_length+16-4);x++)
-                    int_luma[x] = (int_luma2[x] + int_luma2[x+1] + int_luma2[x+2] + int_luma2[x+3] + 2) / 4;
+                    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
                 for (x=0;x < (one_scanline_raw_length+16-4);x++)
                     int_chroma[x] = int_scanline[x] - int_luma[x];
             }
