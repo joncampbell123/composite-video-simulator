@@ -690,6 +690,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
     {
         vector<oneprocsamp>::iterator input_scan = input_samples_read;
+        vector<oneprocsamp>::iterator input_start = input_samples_read;
 
         /* render normally */
         for (y=0;y < dstframe->height && (input_scan+(one_scanline_raw_length*2)) < input_samples_end;y++) {
@@ -813,6 +814,16 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
         if (disable_sync)
             input_samples_read = input_scan;
+
+        {
+            vector<oneprocsamp>::iterator input_should = input_start + (one_scanline_raw_length * 240);
+
+            if (input_should > input_samples_end)
+                input_should = input_samples_end;
+
+            if (input_samples_read < input_should)
+                input_samples_read = input_should;
+        }
     }
 }
 
