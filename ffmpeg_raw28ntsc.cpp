@@ -713,27 +713,41 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                 }
             }
 
-            if (disable_subcarrier) {
-                for (x=0;x < (one_scanline_raw_length+16);x++) {
-                    int_luma[x] = int_scanline[x];
-                    int_chroma[x] = 0;
-                }
-            }
-            else {
-                /* 28.6MHz is exactly 8x the chroma subcarrier.
-                 * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
-                 * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
-                 * say, 40MHz. Then lowpass a bit more to remove remaining subcarrier.
-                 *
-                 * Once luma is determined, subtract from original to get chroma subcarrier.
-                 * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
-                 * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
-                 * fine details have color artifacts with composite video. */
-                for (x=0;x < (one_scanline_raw_length+16-4);x++)
-                    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
-                for (x=0;x < (one_scanline_raw_length+16-4);x++)
-                    int_chroma[x] = int_scanline[x] - int_luma[x];
-            }
+	    if (disable_subcarrier) {
+		    for (x=0;x < (one_scanline_raw_length+16);x++) {
+			    int_luma[x] = int_scanline[x];
+			    int_chroma[x] = 0;
+		    }
+	    }
+	    else {
+		    unsigned int burst_stop = one_scanline_raw_length;
+
+		    /* 28.6MHz is exactly 8x the chroma subcarrier.
+		     * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
+		     * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
+		     * say, 40MHz. Then lowpass a bit more to remove remaining subcarrier.
+		     *
+		     * Once luma is determined, subtract from original to get chroma subcarrier.
+		     * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
+		     * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
+		     * fine details have color artifacts with composite video. */
+		    for (x=0;x < burst_stop;x++)
+			    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
+		    for (x=0;x < burst_stop;x++)
+			    int_chroma[x] = int_scanline[x] - int_luma[x];
+		    /* sum chroma samples to enhance and amplify the chroma subcarrier reference burst */
+		    for (x=0;x < burst_stop;x++)
+			    int_chroma[x] = (int_chroma[x] + int_chroma[x+8] + int_chroma[x+16] + int_chroma[x+24] - int_chroma[x+4] - int_chroma[x+12] - int_chroma[x+20] - int_chroma[x+28]);
+		    /* additional filtering to help remove spurious noise, using the fact that the pure sine wave has a full cycle of 8 samples, half 4 samples, summing cancels out */
+		    for (x=0;x < burst_stop;x++)
+			    int_chroma[x] -= (int_chroma[x] + int_chroma[x+4]) / 2;
+		    /* return to original levels. filtering has horizontally shifted chroma. */
+		    for (x=burst_stop-1;(int)x >= 0;x--)
+			    int_chroma[x + 16] = int_chroma[x] / 8;
+		    /* filter from luma with improved chroma */
+		    for (x=0;x < burst_stop;x++)
+			    int_luma[x] = int_scanline[x] - int_chroma[x];
+	    }
 
             uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
             for (x=0;x < dstframe->width;x++) {
