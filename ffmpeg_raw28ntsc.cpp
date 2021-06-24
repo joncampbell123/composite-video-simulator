@@ -720,8 +720,6 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 		    }
 	    }
 	    else {
-		    unsigned int burst_stop = one_scanline_raw_length;
-
 		    /* 28.6MHz is exactly 8x the chroma subcarrier.
 		     * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
 		     * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
@@ -731,23 +729,23 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 		     * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
 		     * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
 		     * fine details have color artifacts with composite video. */
-		    for (x=0;x < burst_stop;x++)
+		    for (x=0;x < one_scanline_raw_length;x++)
 			    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
-		    for (x=0;x < burst_stop;x++)
+		    for (x=0;x < one_scanline_raw_length;x++)
 			    int_chroma[x] = int_scanline[x] - int_luma[x];
 		    /* sum chroma samples to enhance and amplify the chroma subcarrier reference burst */
-		    for (x=0;x < burst_stop;x++)
+		    for (x=0;x < one_scanline_raw_length;x++)
 			    int_chroma[x] = (int_chroma[x] + int_chroma[x+8] - int_chroma[x+4] - int_chroma[x+12]);
 		    /* additional filtering to help remove spurious noise, using the fact that the pure sine wave has a full cycle of 8 samples, half 4 samples, summing cancels out */
 		    for (unsigned int iter=0;iter < 4;iter++) {
-			    for (x=0;x < burst_stop;x++)
+			    for (x=0;x < one_scanline_raw_length;x++)
 				    int_chroma[x] -= (int_chroma[x] + int_chroma[x+4]) / 2;
 		    }
 		    /* return to original levels. filtering has horizontally shifted chroma. */
-		    for (x=burst_stop-1;(int)x >= 0;x--)
+		    for (x=one_scanline_raw_length-1;(int)x >= 0;x--)
 			    int_chroma[x + 8/*first filtering*/ + 8/*second filtering*/] = int_chroma[x] / 4;
 		    /* filter from luma with improved chroma */
-		    for (x=0;x < burst_stop;x++)
+		    for (x=0;x < one_scanline_raw_length;x++)
 			    int_luma[x] = int_scanline[x] - int_chroma[x];
 	    }
 
