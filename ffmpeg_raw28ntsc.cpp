@@ -739,11 +739,13 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 		    for (x=0;x < burst_stop;x++)
 			    int_chroma[x] = (int_chroma[x] + int_chroma[x+8] - int_chroma[x+4] - int_chroma[x+12]);
 		    /* additional filtering to help remove spurious noise, using the fact that the pure sine wave has a full cycle of 8 samples, half 4 samples, summing cancels out */
-		    for (x=0;x < burst_stop;x++)
-			    int_chroma[x] -= (int_chroma[x] + int_chroma[x+4]) / 2;
+		    for (unsigned int iter=0;iter < 4;iter++) {
+			    for (x=0;x < burst_stop;x++)
+				    int_chroma[x] -= (int_chroma[x] + int_chroma[x+4]) / 2;
+		    }
 		    /* return to original levels. filtering has horizontally shifted chroma. */
 		    for (x=burst_stop-1;(int)x >= 0;x--)
-			    int_chroma[x + 8] = int_chroma[x] / 4;
+			    int_chroma[x + 8/*first filtering*/ + 8/*second filtering*/] = int_chroma[x] / 4;
 		    /* filter from luma with improved chroma */
 		    for (x=0;x < burst_stop;x++)
 			    int_luma[x] = int_scanline[x] - int_chroma[x];
