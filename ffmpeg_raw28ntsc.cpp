@@ -263,6 +263,9 @@ unsigned char                               read_tmp[4096];
 struct oneprocsamp {
     uint8_t                                 raw;
     uint8_t                                 hsync_dc_raw;
+    int16_t                                 luma;
+    int16_t                                 chroma;
+    int16_t                                 rawluma;
 };
 
 std::vector<oneprocsamp>                    input_samples;
@@ -694,33 +697,25 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
         /* render normally */
         for (y=0;y < dstframe->height && (input_scan+(one_scanline_raw_length*2)) < input_samples_end;y++) {
-            /* use interpolation because our concept of "one scanline" isn't exactly an integer.
-             * without interpolation, adjustment can be a bit jagged. */
-            {
-                int a = (int)floor(one_scanline_width_err * 256);
-                if (a < 0) a = 0;
-                if (a > 256) a = 256;
-                for (x=0;x < (one_scanline_raw_length+16);x++) {
-                    int v = ((input_scan[x].raw * (256 - a)) + (input_scan[x+1].raw * a)) >> 8;
-                    if (!disable_equalization) {
-                        v -= blank_level;
-                        if (!disable_wp_equ) {
-                            v = (v * 255) / (white_level - blank_level);
-                        }
-                    }
-                    if (v < 0) v = 0;
-                    if (v > 255) v = 255;
-                    int_scanline[x] = (uint8_t)v;
-                }
+            for (x=0;x < (one_scanline_raw_length+16);x++) {
+                input_scan[x].luma = input_scan[x].raw;
+                input_scan[x].chroma = 0;
             }
 
-	    if (disable_subcarrier) {
-		    for (x=0;x < (one_scanline_raw_length+16);x++) {
-			    int_luma[x] = int_scanline[x];
-			    int_chroma[x] = 0;
-		    }
+            if (!disable_equalization) {
+                for (x=0;x < (one_scanline_raw_length+16);x++) {
+                    int v = (int)input_scan[x].luma - blank_level;
+                    if (!disable_wp_equ) v = (v * 255) / (white_level - blank_level);
+                    input_scan[x].luma = v;
+		}
+            }
+
+            /* if the color subcarrier decoder doesn't sense the colorburst, then rawluma can be used for full black and white picture rendition */
+            for (x=0;x < (one_scanline_raw_length+16);x++) {
+                input_scan[x].rawluma = input_scan[x].luma;
 	    }
-	    else {
+
+	    if (!disable_subcarrier) {
 		    /* 28.6MHz is exactly 8x the chroma subcarrier.
 		     * So instead of complex filtering, we can just average the scanline with itself delayed 4 (half of 8) samples
 		     * and make use of destructive interference to filter out the chroma subcarrier. This would not work if using,
@@ -730,6 +725,8 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 		     * Note that some of the edge detail in luma will also end up in the chroma subcarrier.
 		     * We'll lowpass the decoded I and Q later to help filter that out, but it is the reason
 		     * fine details have color artifacts with composite video. */
+		    for (x=0;x < (one_scanline_raw_length+16);x++)
+			    int_scanline[x] = input_scan[x].luma;
 		    for (x=0;x < one_scanline_raw_length;x++)
 			    int_luma[x] = (int_scanline[x] + int_scanline[x+4] + 1) / 2;
 		    for (x=0;x < one_scanline_raw_length;x++)
@@ -748,15 +745,20 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 		    /* filter from luma with improved chroma */
 		    for (x=0;x < one_scanline_raw_length;x++)
 			    int_luma[x] = int_scanline[x] - int_chroma[x];
+		    /* copy back */
+		    for (x=0;x < one_scanline_raw_length;x++) {
+			    input_scan[x].luma = int_luma[x];
+			    input_scan[x].chroma = int_chroma[x];
+		    }
 	    }
 
             uint32_t *dst = (uint32_t*)(dstframe->data[0] + (dstframe->linesize[0] * y));
             for (x=0;x < dstframe->width;x++) {
                 int r,g,b;
-                int Y = int_luma[x];
+                int Y = input_scan[x].luma;
 
                 if (show_subcarrier)
-                    Y = int_chroma[x] + 128;
+                    Y = input_scan[x].chroma + 128;
 
                 r = g = b = Y;
                 if (r < 0) r = 0;
