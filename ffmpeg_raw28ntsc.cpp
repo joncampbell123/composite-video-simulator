@@ -569,11 +569,6 @@ oneprocsamp hsync_dc_proc(oneprocsamp v) {
     }
 
     {
-        int x = v.raw - hsync_dc_level;
-        if (x < 0) x = 0;
-        if (x > 255) x = 255;
-        v.raw = (uint8_t)x;
-
         assert(hsync_dc_detect_delay_i >= hsync_dc_detect_delay.begin());
         assert(hsync_dc_detect_delay_i < hsync_dc_detect_delay.end());
         uint8_t ov = *hsync_dc_detect_delay_i;
@@ -665,11 +660,11 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
                     while (j < i) {
                         if ((*j).hsync_dc_raw >= sync_threshhold) {
-                            maxa += (*j).hsync_dc_raw;
+                            maxa += (*j).raw;
                             maxd++;
                         }
                         else {
-                            mina += (*j).hsync_dc_raw;
+                            mina += (*j).raw;
                             mind++;
                         }
 
