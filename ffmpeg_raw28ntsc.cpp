@@ -557,7 +557,8 @@ oneprocsamp hsync_dc_proc(oneprocsamp v) {
         lv = hsync_dc_detect[i].lowpass(lv);
 
     if (hsync_dc_level > lv) {
-        hsync_dc_level = lv; // lowpass filter already smooths it out
+        const double a = 1.0 / (one_scanline_time * 0.07 * 0.75);
+        hsync_dc_level = (hsync_dc_level * (1.0 - a)) + (lv * a);
     }
     else {
         const double a = 1.0 / (one_frame_time * 0.6);
