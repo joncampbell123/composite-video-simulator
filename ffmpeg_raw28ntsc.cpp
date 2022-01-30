@@ -550,8 +550,8 @@ vector<uint8_t>             hsync_dc_detect_delay;
 vector<uint8_t>::iterator   hsync_dc_detect_delay_i;
 
 uint8_t                     sync_threshhold = (uint8_t)(192 * 0.25 * 0.5);
-uint8_t                     blank_level = (uint8_t)0;
-uint8_t                     white_level = (uint8_t)192;
+double                      blank_level = (uint8_t)0;
+double                      white_level = (uint8_t)192;
 
 oneprocsamp hsync_dc_proc(oneprocsamp v) {
     double lv = v.raw;
@@ -674,7 +674,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     if (mind > 0) mina /= mind;
                     if (maxd > 0) maxa /= maxd;
 
-                    int nwhite = (uint8_t)min(max((int)(maxa + ((maxa - mina) / 0.25)),maxa+1),240);
+                    int nwhite = (uint8_t)min(max((int)(maxa + ((maxa - mina) / (0.25/*sync to blank*/ + 0.075/*blank to black*/ + 0.125/*white to max*/))),maxa+1),240);
                     white_level = ((white_level * 7) + nwhite + 4) / 8;
 
                     int nblack = maxa;
