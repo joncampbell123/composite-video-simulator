@@ -674,7 +674,7 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
                     if (mind > 0) mina /= mind;
                     if (maxd > 0) maxa /= maxd;
 
-                    int nwhite = (uint8_t)min(max((int)(maxa + ((maxa - mina) / (0.25/*sync to blank*/ + 0.075/*blank to black*/ + 0.125/*white to max*/))),maxa+1),240);
+                    int nwhite = (uint8_t)min(max((int)(maxa + ((maxa - mina) / (0.25/*sync to blank*/ + 0.125/*white to max*/))),maxa+1),240);
                     white_level = ((white_level * 7) + nwhite + 4) / 8;
 
                     int nblack = maxa;
