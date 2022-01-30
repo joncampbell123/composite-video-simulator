@@ -317,7 +317,7 @@ void refill_src() {
                 input_samples_end += (size_t)rd;
                 assert(input_samples_end <= input_samples.end());
             }
-            if (rd < todo) break;
+            if (rd <= 0) break; /* NTS: anonymous pipes on STDIN might return less than expected, but 0 is EOF */
         }
     }
 }
