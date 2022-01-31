@@ -1004,6 +1004,7 @@ int main(int argc,char **argv) {
         do {
             if (DIE) break;
 
+            lazy_flush_src();
             refill_src();
             if (count_src() < (one_scanline_raw_length*256)) {
                 close_src();
