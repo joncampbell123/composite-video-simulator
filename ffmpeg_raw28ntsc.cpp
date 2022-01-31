@@ -634,6 +634,16 @@ void composite_layer(AVFrame *dstframe,unsigned int field,unsigned long long fie
 
             size_t synclen = (size_t)(ei-si);
 
+            /* Various sync pulses:
+             *
+             * Horizontal scan line: H
+             * Horizontal sync: 0.075H within a scan line of video of time H
+             * Equalization pulse: 0.04H sync followed by blanking within a 0.5H period of time. Two within the time of one scan line.
+             * Vertical sync pulse: 0.43H sync followed by 0.07H blanking within a 0.5H period of time. Two within the time of one scan line.
+             *
+             * -______-............................................................................................. Hsync
+             * -__-----------------------------------------------------__------------------------------------------- Equalization pulse
+             * -_____________________________________________________--___________________________________________-- Vertical sync pulse*/
             if (synclen >= (int)(one_scanline_raw_length * 0.3)) { /* vertical sync pulse (0.5H - 0.07H) */
                 i = si + (int)(one_scanline_raw_length * 0.3);
                 if (i < ei) i = ei;
