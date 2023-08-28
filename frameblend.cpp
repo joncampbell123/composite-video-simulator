@@ -273,9 +273,7 @@ public:
 
         if (eof_stream) {
             avpkt_release();
-            avpkt->size = 0;
-            avpkt->data = NULL;
-            handle_frame(/*&*/(*avpkt)); // will set got_video
+            handle_frame(); // will set got_video
             if (!got_video) eof = true;
             else fprintf(stderr,"Got latent frame\n");
         }
@@ -371,6 +369,17 @@ public:
                         dst_planes,//input_avstream_video_frame_rgb->data,
                         input_avstream_video_frame_rgb->linesize) <= 0)
                 fprintf(stderr,"WARNING: sws_scale failed\n");
+        }
+    }
+    void handle_frame(void) {
+        avcodec_send_packet(input_avstream_video_codec_context,NULL);
+
+        if (avcodec_receive_frame(input_avstream_video_codec_context,input_avstream_video_frame) >= 0) {
+            got_video = true;
+        }
+        else {
+            got_video = false;
+            fprintf(stderr,"No video decoded\n");
         }
     }
     void handle_frame(AVPacket &pkt) {
