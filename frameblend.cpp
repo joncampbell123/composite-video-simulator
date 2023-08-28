@@ -147,6 +147,9 @@ public:
                     if (ispar->codec_type == AVMEDIA_TYPE_VIDEO) {
                         if (input_avstream_video == NULL && vc == 0) {
                             if ((input_avstream_video_codec_context=avcodec_alloc_context3(avcodec_find_decoder(ispar->codec_id))) != NULL) {
+				if (avcodec_parameters_to_context(input_avstream_video_codec_context,ispar) < 0)
+                                    fprintf(stderr,"WARNING: parameters to context failed\n");
+
                                 if (avcodec_open2(input_avstream_video_codec_context,avcodec_find_decoder(ispar->codec_id),NULL) >= 0) {
                                     input_avstream_video = is;
                                     fprintf(stderr,"Found video stream idx=%zu\n",i);
