@@ -50,7 +50,7 @@ double          gamma_correction = -1;
 
 int             underscan = 0;
 
-bool            use_422_colorspace = false; // I would default this to true but Adobe Premiere Pro apparently can't handle 4:2:2 H.264 >:(
+bool            use_422_colorspace = false;
 AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = -1;
 int		output_height = -1;
