@@ -55,10 +55,6 @@ AVRational	output_field_rate = { 60000, 1001 };	// NTSC 60Hz default
 int		output_width = -1;
 int		output_height = -1;
 int		output_ar_n = 1,output_ar_d = 1;
-int		output_audio_channels = 2;	// VHS stereo (set to 1 for mono)
-int		output_audio_rate = 44100;	// VHS Hi-Fi goes up to 20KHz
-
-uint32_t                            colormap[256];
 
 #define RGBTRIPLET(r,g,b)           (((uint32_t)(r) << (uint32_t)16) + ((uint32_t)(g) << (uint32_t)8) + ((uint32_t)(b) << (uint32_t)0))
 
@@ -511,8 +507,6 @@ static void help(const char *arg0) {
 	fprintf(stderr," -underscan <x>                Underscan the image during rendering\n");
 	fprintf(stderr," -422                          Render to 4:2:2 colorspace\n");
 	fprintf(stderr," -420                          Render to 4:2:0 colorspace\n");
-	fprintf(stderr,"\n");
-	fprintf(stderr,"Note: Video is taken from first input file, and colormap taken from mid scanline of second video.\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -741,8 +735,6 @@ int main(int argc,char **argv) {
 	preset_NTSC();
 	if (parse_argv(argc,argv))
 		return 1;
-
-	for (unsigned int i=0;i < 256;i++) colormap[i] = i * 0x01010101UL;
 
 	/* open all input files */
 	for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
