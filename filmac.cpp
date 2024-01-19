@@ -641,7 +641,7 @@ int clamp255(int x) {
 }
 
 double gamma_dec(double x) {
-	return pow(x,gamma_correction);
+	return pow(x,1.0 / gamma_correction);
 }
 
 unsigned long gamma_dec16_table[256];
@@ -660,7 +660,7 @@ unsigned long gamma_dec16(unsigned long x) {
 }
 
 double gamma_enc(double x) {
-	return pow(x,1.0 / gamma_correction);
+	return pow(x,gamma_correction);
 }
 
 unsigned long gamma_enc16(unsigned long x) {
@@ -917,6 +917,47 @@ int main(int argc,char **argv) {
 					}
 				}
 
+				long scaleto = gamma_correction > 1 ? (0x10000l * 8192l) : 0x10000l;
+				long minv = (scaleto * 6l) / 10l;
+				long maxv = (scaleto * 4l) / 10l;
+
+				{
+					unsigned int minx = (output_width*25)/100;
+					unsigned int maxx = (output_width*75)/100;
+					unsigned int miny = (output_height*25)/100;
+					unsigned int maxy = (output_height*75)/100;
+
+					for (unsigned int y=miny;y < maxy;y++) {
+						long *longframe = lframe + (y * output_width * 3);
+						for (unsigned int x=minx;x < maxx;x++) {
+							/* BGR */
+							long gr =
+								((longframe[x*3+0]/*B*/ * 11l) +
+								 (longframe[x*3+1]/*G*/ * 59l) +
+								 (longframe[x*3+2]/*R*/ * 30l) + 50l) / 100l;
+
+							if (minv > gr)
+								minv = gr;
+							if (maxv < gr)
+								maxv = gr;
+						}
+					}
+				}
+
+				if (minv == maxv) maxv++;
+
+//				fprintf(stderr,"\nmin=%.15f max=%.15f\n",(double)minv/scaleto,(double)maxv/scaleto);
+
+				for (unsigned int y=0;y < output_height;y++) {
+					long *longframe = lframe + (y * output_width * 3);
+					for (unsigned int x=0;x < output_width*3;x++) {
+						long long v = (((long long)(longframe[x] - minv)) * (long long)scaleto) / ((long long)(maxv - minv));
+						if (v < -0x7FFFFFFFl) v = -0x7FFFFFFFl;
+						if (v >  0x7FFFFFFFl) v =  0x7FFFFFFFl;
+						longframe[x] = (long)v;
+					}
+				}
+
 				if (gamma_correction > 1) {
 					for (unsigned int y=0;y < output_height;y++) {
 						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
@@ -924,9 +965,9 @@ int main(int argc,char **argv) {
 						long *longframe = lframe + (y * output_width * 3);
 
 						for (unsigned int x=0;x < output_width;x++) {
-							outframe[x*4+0] = clamp255(gamma_enc16(longframe[x*3+0] >> 16ul));
-							outframe[x*4+1] = clamp255(gamma_enc16(longframe[x*3+1] >> 16ul));
-							outframe[x*4+2] = clamp255(gamma_enc16(longframe[x*3+2] >> 16ul));
+							outframe[x*4+0] = clamp255(gamma_enc16(std::max(0l,longframe[x*3+0] >> 16l)));
+							outframe[x*4+1] = clamp255(gamma_enc16(std::max(0l,longframe[x*3+1] >> 16l)));
+							outframe[x*4+2] = clamp255(gamma_enc16(std::max(0l,longframe[x*3+2] >> 16l)));
 							outframe[x*4+3] = 0xFF;
 						}
 					}
@@ -938,9 +979,9 @@ int main(int argc,char **argv) {
 						long *longframe = lframe + (y * output_width * 3);
 
 						for (unsigned int x=0;x < output_width;x++) {
-							outframe[x*4+0] = clamp255(longframe[x*3+0] >> 16ul);
-							outframe[x*4+1] = clamp255(longframe[x*3+1] >> 16ul);
-							outframe[x*4+2] = clamp255(longframe[x*3+2] >> 16ul);
+							outframe[x*4+0] = clamp255(std::max(0l,longframe[x*3+0] >> 16l));
+							outframe[x*4+1] = clamp255(std::max(0l,longframe[x*3+1] >> 16l));
+							outframe[x*4+2] = clamp255(std::max(0l,longframe[x*3+2] >> 16l));
 							outframe[x*4+3] = 0xFF;
 						}
 					}
