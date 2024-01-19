@@ -592,8 +592,6 @@ void output_frame(AVFrame *frame,unsigned long long field_number) {
 	{
 		frame->interlaced_frame = 0;
 		frame->pts = field_number;
-		pkt->pts = field_number;
-		pkt->dts = field_number;
 	}
 
 	fprintf(stderr,"\x0D" "Output field %llu ",field_number); fflush(stderr);
@@ -827,7 +825,6 @@ int main(int argc,char **argv) {
 
 	/* run all inputs and render to output, until done */
 	{
-		signed long long outbase=0;
 		long final_minv = -1,final_maxv = -1;
 		bool final_init = false;
 
@@ -836,57 +833,25 @@ int main(int argc,char **argv) {
 		{
 			signed long long current=0;
 
-			while (!input_file.eof && !DIE) {
-				if (!input_file.got_video)
-					input_file.next_packet();
-				else
-					break;
-			}
-
-			if (input_file.input_avstream_video_frame != NULL && input_file.got_video) {
-				input_file.frame_copy_scale();
-				input_file.got_video = false;
-			}
-
 			std::vector<uint32_t*> frames; /* they're all the same RGBA frame, so just store a pointer */
-			std::vector<double> frame_t;
-
-			if (input_file.input_avstream_video_frame_rgb != NULL) {
-				frame_t.push_back(input_file.video_frame_rgb_to_output_f());
-				frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
-			}
 
 			while (!DIE) {
-				size_t cutoff = 0;
-
-				while (!input_file.eof && !DIE && input_file.video_frame_to_output_f() < (current + 30LL)) {
-					input_file.next_packet();
-
-					if (input_file.input_avstream_video_frame != NULL && input_file.got_video) {
-						input_file.frame_copy_scale();
-						input_file.got_video = false;
-
-						if (input_file.input_avstream_video_frame_rgb != NULL) {
-							frame_t.push_back(input_file.video_frame_rgb_to_output_f());
-							frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
-						}
-					}
-				}
-
-				if (input_file.eof &&
-					(input_file.video_frame_to_output_f() < -1000/*AV_NOPTS_VALUE*/ ||
-					 current > (unsigned long long)ceil(input_file.video_frame_to_output_f())))
+				if (input_file.eof)
 					break;
 
-				for (size_t i=0;(i+1ul) < frames.size();i++) {
-					double bt = frame_t[i];
-					double et = frame_t[i+1];
+				input_file.next_packet();
 
-					if (i != 0) {
-						if ((et + 2.0) < current) {
-							cutoff = i;
-						}
+				if (input_file.input_avstream_video_frame != NULL && input_file.got_video) {
+					input_file.frame_copy_scale();
+					input_file.got_video = false;
+
+					if (input_file.input_avstream_video_frame_rgb != NULL) {
+						frames.push_back(input_file.copy_rgba(input_file.input_avstream_video_frame_rgb));
+						current = input_file.video_frame_rgb_to_output_f();
 					}
+				}
+				else {
+					continue;
 				}
 
 				long *lframe = new long[output_width*output_height*3];
@@ -1066,19 +1031,15 @@ int main(int argc,char **argv) {
 				output_frame(output_avstream_video_encode_frame,current);
 				current++;
 
-				if (cutoff > 0) {
-					assert(frame_t.size() > cutoff);
-					assert(frames.size() > cutoff);
-
-					for (size_t i=0;i < cutoff;i++) {
+				if (frames.size() != 0) {
+					for (size_t i=0;i < frames.size();i++) {
 						if (frames[i] != NULL) {
 							delete[] frames[i];
 							frames[i] = NULL;
 						}
 					}
 
-					frame_t.erase(frame_t.begin(),frame_t.begin()+cutoff);
-					frames.erase(frames.begin(),frames.begin()+cutoff);
+					frames.erase(frames.begin(),frames.end());
 				}
 			}
 
@@ -1089,9 +1050,6 @@ int main(int argc,char **argv) {
 				}
 			}
 			frames.clear();
-			frame_t.clear();
-
-			outbase += current;
 		}
 	}
 
