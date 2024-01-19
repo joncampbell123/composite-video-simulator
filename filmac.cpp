@@ -962,7 +962,7 @@ int main(int argc,char **argv) {
 					else
 						minv -= dist / 25;
 
-					maxv += dist / 25;
+					maxv += dist / 10;
 				}
 
 				if (!final_init) {
