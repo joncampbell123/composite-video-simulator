@@ -737,11 +737,9 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->pix_fmt = use_422_colorspace ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV420P;
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
-		output_avstream_video_codec_context->bit_rate = 50000000;
-		output_avstream_video_codec_context->qmin = 2;
 		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num};
 
-		av_dict_set(&opt_dict,"crf","1",0);
+		av_dict_set(&opt_dict,"crf","16",0);
 		av_dict_set(&opt_dict,"crf_max","16",0);
 		av_dict_set(&opt_dict,"preset","superfast",0);
 
@@ -923,10 +921,10 @@ int main(int argc,char **argv) {
 				long maxv = (scaleto * 4l) / 10l;
 
 				{
-					unsigned int minx = (output_width*25)/100;
-					unsigned int maxx = (output_width*95)/100;
-					unsigned int miny = (output_height*5)/100;
-					unsigned int maxy = (output_height*95)/100;
+					unsigned int minx = (output_width*15)/100;
+					unsigned int maxx = (output_width*90)/100;
+					unsigned int miny = (output_height*10)/100;
+					unsigned int maxy = (output_height*90)/100;
 
 					for (unsigned int y=miny;(y+16) < maxy;y += 16) {
 						for (unsigned int x=minx;(x+16) < maxx;x += 16) {
@@ -953,6 +951,12 @@ int main(int argc,char **argv) {
 				}
 
 				if (minv == maxv) maxv++;
+
+				{
+					const long dist = maxv - minv;
+					minv -= dist / 10;
+					maxv += dist / 25;
+				}
 
 //				fprintf(stderr,"\nmin=%.15f max=%.15f\n",(double)minv/scaleto,(double)maxv/scaleto);
 
