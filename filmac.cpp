@@ -888,46 +888,65 @@ int main(int argc,char **argv) {
 					}
 				}
 
+				long *lframe = new long[output_width*output_height*3];
+
 				if (gamma_correction > 1) {
 					for (unsigned int y=0;y < output_height;y++) {
 						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+						unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0])));
+						long *longframe = lframe + (y * output_width * 3);
+
 						for (unsigned int x=0;x < output_width;x++) {
-							unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
-							unsigned long long r,g,b;
-
-							b = gamma_dec16(inframe[0]) << 16ul;
-							g = gamma_dec16(inframe[1]) << 16ul;
-							r = gamma_dec16(inframe[2]) << 16ul;
-
-							outframe[0] = clamp255(gamma_enc16(b >> 16ull));
-							outframe[1] = clamp255(gamma_enc16(g >> 16ull));
-							outframe[2] = clamp255(gamma_enc16(r >> 16ull));
-							outframe[3] = 0xFF;
-
-							outframe += 4;
+							longframe[x*3+0] = gamma_dec16(inframe[x*4+0]) << 16ul;
+							longframe[x*3+1] = gamma_dec16(inframe[x*4+1]) << 16ul;
+							longframe[x*3+2] = gamma_dec16(inframe[x*4+2]) << 16ul;
 						}
 					}
 				}
 				else {
 					for (unsigned int y=0;y < output_height;y++) {
 						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+						unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0])));
+						long *longframe = lframe + (y * output_width * 3);
+
 						for (unsigned int x=0;x < output_width;x++) {
-							unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
-							unsigned long r,g,b;
-
-							b = inframe[0] << 16ul;
-							g = inframe[1] << 16ul;
-							r = inframe[2] << 16ul;
-
-							outframe[0] = clamp255(b >> 16ul);
-							outframe[1] = clamp255(g >> 16ul);
-							outframe[2] = clamp255(r >> 16ul);
-							outframe[3] = 0xFF;
-
-							outframe += 4;
+							longframe[x*3+0] = inframe[x*4+0] << 16ul;
+							longframe[x*3+1] = inframe[x*4+1] << 16ul;
+							longframe[x*3+2] = inframe[x*4+2] << 16ul;
 						}
 					}
 				}
+
+				if (gamma_correction > 1) {
+					for (unsigned int y=0;y < output_height;y++) {
+						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+						unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0])));
+						long *longframe = lframe + (y * output_width * 3);
+
+						for (unsigned int x=0;x < output_width;x++) {
+							outframe[x*4+0] = clamp255(gamma_enc16(longframe[x*3+0] >> 16ul));
+							outframe[x*4+1] = clamp255(gamma_enc16(longframe[x*3+1] >> 16ul));
+							outframe[x*4+2] = clamp255(gamma_enc16(longframe[x*3+2] >> 16ul));
+							outframe[x*4+3] = 0xFF;
+						}
+					}
+				}
+				else {
+					for (unsigned int y=0;y < output_height;y++) {
+						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+						unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0])));
+						long *longframe = lframe + (y * output_width * 3);
+
+						for (unsigned int x=0;x < output_width;x++) {
+							outframe[x*4+0] = clamp255(longframe[x*3+0] >> 16ul);
+							outframe[x*4+1] = clamp255(longframe[x*3+1] >> 16ul);
+							outframe[x*4+2] = clamp255(longframe[x*3+2] >> 16ul);
+							outframe[x*4+3] = 0xFF;
+						}
+					}
+				}
+
+				delete[] lframe;
 
 				output_avstream_video_frame->pts = current;
 				output_avstream_video_frame->pkt_dts = current;
