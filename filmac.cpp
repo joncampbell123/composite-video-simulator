@@ -923,8 +923,8 @@ int main(int argc,char **argv) {
 				{
 					unsigned int minx = (output_width*15)/100;
 					unsigned int maxx = (output_width*90)/100;
-					unsigned int miny = (output_height*10)/100;
-					unsigned int maxy = (output_height*90)/100;
+					unsigned int miny = (output_height*0)/100;
+					unsigned int maxy = (output_height*100)/100;
 
 					for (unsigned int y=miny;(y+16) < maxy;y += 16) {
 						for (unsigned int x=minx;(x+16) < maxx;x += 16) {
