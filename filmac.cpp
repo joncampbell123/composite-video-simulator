@@ -743,6 +743,7 @@ int main(int argc,char **argv) {
 
 		av_dict_set(&opt_dict,"crf","1",0);
 		av_dict_set(&opt_dict,"crf_max","16",0);
+		av_dict_set(&opt_dict,"preset","superfast",0);
 
 		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
 		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
@@ -923,18 +924,25 @@ int main(int argc,char **argv) {
 
 				{
 					unsigned int minx = (output_width*25)/100;
-					unsigned int maxx = (output_width*75)/100;
-					unsigned int miny = (output_height*25)/100;
-					unsigned int maxy = (output_height*75)/100;
+					unsigned int maxx = (output_width*95)/100;
+					unsigned int miny = (output_height*5)/100;
+					unsigned int maxy = (output_height*95)/100;
 
-					for (unsigned int y=miny;y < maxy;y++) {
-						long *longframe = lframe + (y * output_width * 3);
-						for (unsigned int x=minx;x < maxx;x++) {
-							/* BGR */
-							long gr =
-								((longframe[x*3+0]/*B*/ * 11l) +
-								 (longframe[x*3+1]/*G*/ * 59l) +
-								 (longframe[x*3+2]/*R*/ * 30l) + 50l) / 100l;
+					for (unsigned int y=miny;(y+16) < maxy;y += 16) {
+						for (unsigned int x=minx;(x+16) < maxx;x += 16) {
+							long gr = 0;
+
+							for (unsigned int sy=0;sy < 16;sy++) {
+								long *longframe = lframe + ((y+sy) * output_width * 3);
+								for (unsigned int sx=0;sx < 16;sx++) {
+									/* BGR */
+									gr +=	((longframe[(x+sx)*3+0]/*B*/ * 11l) +
+										 (longframe[(x+sx)*3+1]/*G*/ * 59l) +
+										 (longframe[(x+sx)*3+2]/*R*/ * 30l) + 50l) / 100l;
+								}
+							}
+
+							gr = (gr + 128) / 256;
 
 							if (minv > gr)
 								minv = gr;
