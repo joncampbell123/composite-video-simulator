@@ -927,42 +927,37 @@ int main(int argc,char **argv) {
 					unsigned int maxx = (output_width*90)/100;
 					unsigned int miny = (output_height*0)/100;
 					unsigned int maxy = (output_height*100)/100;
+					unsigned int blw = 128,blh = 128;
 
-					for (unsigned int y=miny;(y+16) < maxy;y += 16) {
-						for (unsigned int x=minx;(x+16) < maxx;x += 16) {
-							long gr = 0;
+					for (unsigned int y=miny;y < maxy;y += blh) {
+						for (unsigned int x=minx;x < maxx;x += blw) {
+							long long grmin = 0,grmax = 0,grd = 0;
 
-							for (unsigned int sy=0;sy < 16;sy++) {
+							for (unsigned int sy=0;sy < blh;sy++) {
 								long *longframe = lframe + ((y+sy) * output_width * 3);
-								for (unsigned int sx=0;sx < 16;sx++) {
+								for (unsigned int sx=0;sx < blw;sx++) {
+									if ((x+sx) >= output_width || (y+sy) >= output_height) continue;
 									/* BGR */
-									gr +=	((longframe[(x+sx)*3+0]/*B*/ * 11l) +
-										 (longframe[(x+sx)*3+1]/*G*/ * 59l) +
-										 (longframe[(x+sx)*3+2]/*R*/ * 30l) + 50l) / 100l;
+									grd++;
+									grmin += std::min(std::min(longframe[(x+sx)*3+0],longframe[(x+sx)*3+1]),longframe[(x+sx)*3+2]);
+
+									grmax = std::max(std::max(longframe[(x+sx)*3+0],longframe[(x+sx)*3+1]),longframe[(x+sx)*3+2]);
+									if (maxv < grmax) maxv = grmax;
 								}
 							}
 
-							gr = (gr + 128) / 256;
+							grmin += grd/2l;
+							grmin /= grd;
+							grmax += grd/2l;
+							grmax /= grd;
 
-							if (minv > gr)
-								minv = gr;
-							if (maxv < gr)
-								maxv = gr;
+							if (minv > grmin)
+								minv = grmin;
 						}
 					}
 				}
 
 				if (minv == maxv) maxv++;
-
-				/* expand to help avoid clipping */
-				{
-					const long dist = maxv - minv;
-
-					if (gamma_correction <= 1)
-						minv -= dist / 25;
-
-					maxv += dist / 25;
-				}
 
 				if (!final_init) {
 					final_init = true;
@@ -992,6 +987,29 @@ int main(int argc,char **argv) {
 						longframe[x] = (long)v;
 					}
 				}
+
+#if 0
+				{
+					unsigned long tl=0,th=0;
+
+					for (unsigned int y=0;y < output_height;y++) {
+						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
+						unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0])));
+						long *longframe = lframe + (y * output_width * 3);
+
+						for (unsigned int x=0;x < output_width;x++) {
+							bool itl = std::min(std::min(longframe[x*3+0],longframe[x*3+1]),longframe[x*3+2]) < 0;
+							bool ith = std::max(std::max(longframe[x*3+0],longframe[x*3+1]),longframe[x*3+2]) > scaleto;
+							if (ith) { longframe[x*3+2] = scaleto; longframe[x*3+1] = 0x00; longframe[x*3+0] = 0x00; }
+							else if (itl) { longframe[x*3+2] = 0x00; longframe[x*3+1] = scaleto; longframe[x*3+0] = 0x00; }
+							tl += itl?1:0;
+							th += ith?1:0;
+						}
+					}
+
+					fprintf(stderr,"toolow=%lu toohigh=%lu\n",tl,th);
+				}
+#endif
 
 				if (gamma_correction > 1) {
 					for (unsigned int y=0;y < output_height;y++) {
