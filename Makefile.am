@@ -3,13 +3,10 @@ ACLOCAL_AMFLAGS = -I m4
 top = $(shell pwd)
 
 bin_PROGRAMS = \
-	normalize_ts \
-	ffmpeg_to_composite \
-	ffmpeg_colorkey \
-	ffmpeg_posterize \
-	ffmpeg_average_delay \
-	ffmpeg_colormap \
-	ffmpeg_scanimate \
+	frameblend \
+	filmac
+
+bin_DISABLED = \
 	ffmpeg_raw28ntsc_step7 \
 	ffmpeg_raw28ntsc_step6 \
 	ffmpeg_raw28ntsc_step5 \
@@ -17,9 +14,15 @@ bin_PROGRAMS = \
 	ffmpeg_raw28ntsc_step3 \
 	ffmpeg_raw28ntsc_step2 \
 	ffmpeg_raw28ntsc_step1 \
+	ffmpeg_average_delay \
+	ffmpeg_to_composite \
+	ffmpeg_posterize \
+	ffmpeg_scanimate \
 	ffmpeg_raw28ntsc \
+	ffmpeg_colorkey \
+	ffmpeg_colormap \
 	ffmpeg_cassette \
-	frameblend \
+	normalize_ts \
 	ffmpeg_ntsc
 
 noinst_PROGRAMS =
@@ -27,6 +30,10 @@ noinst_PROGRAMS =
 frameblend_SOURCES = frameblend.cpp
 frameblend_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
 frameblend_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
+
+filmac_SOURCES = filmac.cpp
+filmac_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
+filmac_LDADD = $(AVCODEC_LIBS) $(AVFORMAT_LIBS) $(AVUTIL_LIBS) $(SWSCALE_LIBS) $(SWRESAMPLE_LIBS)
 
 normalize_ts_SOURCES = normalize_ts.cpp
 normalize_ts_CXXFLAGS = $(AVCODEC_CFLAGS) $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS) $(SWSCALE_CFLAGS) $(SWRESAMPLE_CFLAGS)
