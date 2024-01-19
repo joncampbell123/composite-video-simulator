@@ -916,7 +916,7 @@ int main(int argc,char **argv) {
 					}
 				}
 
-				long scaleto = gamma_correction > 1 ? (0x10000l * 8192l) : 0x10000l;
+				long scaleto = gamma_correction > 1 ? (0x10000l * 8192l) : (0x10000l * 256l);
 				long minv = (scaleto * 6l) / 10l;
 				long maxv = (scaleto * 4l) / 10l;
 
@@ -955,11 +955,15 @@ int main(int argc,char **argv) {
 				/* expand to help avoid clipping */
 				{
 					const long dist = maxv - minv;
-					minv -= dist / 10;
+					if (gamma_correction > 1)
+						minv -= dist / 10;
+					else
+						minv -= dist / 25;
+
 					maxv += dist / 25;
 				}
 
-//				fprintf(stderr,"\nmin=%.15f max=%.15f\n",(double)minv/scaleto,(double)maxv/scaleto);
+//				fprintf(stderr,"\nmin=%.15f max=%.15f gc=%lu\n",(double)minv/scaleto,(double)maxv/scaleto,scaleto);
 
 				for (unsigned int y=0;y < output_height;y++) {
 					long *longframe = lframe + (y * output_width * 3);
