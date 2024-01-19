@@ -641,7 +641,7 @@ int clamp255(int x) {
 }
 
 double gamma_dec(double x) {
-	return pow(x,1.0 / gamma_correction);
+	return pow(x,gamma_correction);
 }
 
 unsigned long gamma_dec16_table[256];
@@ -660,7 +660,7 @@ unsigned long gamma_dec16(unsigned long x) {
 }
 
 double gamma_enc(double x) {
-	return pow(x,gamma_correction);
+	return pow(x,1.0 / gamma_correction);
 }
 
 unsigned long gamma_enc16(unsigned long x) {
@@ -957,12 +957,11 @@ int main(int argc,char **argv) {
 				/* expand to help avoid clipping */
 				{
 					const long dist = maxv - minv;
-					if (gamma_correction > 1)
-						minv -= dist / 10;
-					else
+
+					if (gamma_correction <= 1)
 						minv -= dist / 25;
 
-					maxv += dist / 10;
+					maxv += dist / 25;
 				}
 
 				if (!final_init) {
