@@ -952,6 +952,7 @@ int main(int argc,char **argv) {
 
 				if (minv == maxv) maxv++;
 
+				/* expand to help avoid clipping */
 				{
 					const long dist = maxv - minv;
 					minv -= dist / 10;
