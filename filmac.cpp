@@ -41,11 +41,6 @@ using namespace std;
 #include <vector>
 #include <stdexcept>
 
-bool            squelch_frameblend_near_match = false;
-
-bool            fullframealt = false;
-int             framealt = 1;
-
 double          gamma_correction = -1;
 
 int             underscan = 0;
@@ -450,37 +445,8 @@ class InputFile {
 		double                  t,pt;
 };
 
-std::vector<InputFile>      input_files;
+InputFile                   input_file;
 std::string                 output_file;
-
-InputFile &current_input_file(void) {
-	if (input_files.empty()) {
-		std::string what = "input files empty";
-		throw std::out_of_range(/*&*/what);
-	}
-
-	return *(input_files.rbegin()); /* last one */
-}
-
-InputFile &new_input_file(void) {
-	if (!input_files.empty()) {
-		/* copy the last one, except for some fields */
-		{
-			InputFile &last = current_input_file();
-			input_files.push_back(last);
-		}
-		{
-			InputFile &last = current_input_file();
-			last.reset_on_dup();
-		}
-	}
-	else {
-		/* make a new one with defaults */
-		input_files.push_back(InputFile());
-	}
-
-	return current_input_file();
-}
 
 volatile int DIE = 0;
 
@@ -500,8 +466,6 @@ static void help(const char *arg0) {
 	fprintf(stderr," -or <frame rate>\n");
 	fprintf(stderr," -width <x>\n");
 	fprintf(stderr," -height <x>\n");
-	fprintf(stderr," -sqnr                         Squelch frame interpolation when frame rates match (1%% margin)\n");
-	fprintf(stderr," -ffa                          Full frame alternate interpolation\n");
 	fprintf(stderr," -fa <x>                       Interpolate alternate frames\n");
 	fprintf(stderr," -gamma <x>                    Interpolate with gamma correction (number, ntsc, vga)\n");
 	fprintf(stderr," -underscan <x>                Underscan the image during rendering\n");
@@ -535,20 +499,6 @@ static int parse_argv(int argc,char **argv) {
 				output_height = (int)strtoul(a,NULL,0);
 				if (output_height < 32) return 1;
 			}
-			else if (!strcmp(a,"sqnr")) {
-				squelch_frameblend_near_match = true;
-			}
-			else if (!strcmp(a,"ffa")) {
-				fullframealt = true;
-			}
-			else if (!strcmp(a,"fa")) {
-				a = argv[i++];
-				if (a == NULL) return 1;
-
-				framealt = atoi(a);
-				if (framealt < 1) framealt = 1;
-				if (framealt > 8) framealt = 8;
-			}
 			else if (!strcmp(a,"gamma")) {
 				a = argv[i++];
 				if (a == NULL) return 1;
@@ -561,7 +511,7 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"i")) {
 				a = argv[i++];
 				if (a == NULL) return 1;
-				new_input_file().path = a;
+				input_file.path = a;
 			}
 			else if (!strcmp(a,"or")) {
 				a = argv[i++];
@@ -625,7 +575,7 @@ static int parse_argv(int argc,char **argv) {
 		fprintf(stderr,"No output file specified\n");
 		return 1;
 	}
-	if (input_files.empty()) {
+	if (input_file.path.empty()) {
 		fprintf(stderr,"No input files specified\n");
 		return 1;
 	}
@@ -737,23 +687,18 @@ int main(int argc,char **argv) {
 		return 1;
 
 	/* open all input files */
-	for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
-		if (!(*i).open_input()) {
-			fprintf(stderr,"Failed to open %s\n",(*i).path.c_str());
-			return 1;
-		}
+	if (!input_file.open_input()) {
+		fprintf(stderr,"Failed to open %s\n",input_file.path.c_str());
+		return 1;
 	}
 
 	/* pick output */
 	if (output_width < 1 || output_height < 1) {
-		for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++) {
-			if ((*i).input_avstream_video_codec_context != NULL) {
-				output_width = (*i).input_avstream_video_codec_context->width;
-				output_height = (*i).input_avstream_video_codec_context->height;
-				output_ar_n = (*i).input_avstream_video_codec_context->sample_aspect_ratio.num;
-				output_ar_d = (*i).input_avstream_video_codec_context->sample_aspect_ratio.den;
-				break;
-			}
+		if (input_file.input_avstream_video_codec_context != NULL) {
+			output_width = input_file.input_avstream_video_codec_context->width;
+			output_height = input_file.input_avstream_video_codec_context->height;
+			output_ar_n = input_file.input_avstream_video_codec_context->sample_aspect_ratio.num;
+			output_ar_d = input_file.input_avstream_video_codec_context->sample_aspect_ratio.den;
 		}
 	}
 	fprintf(stderr,"Output frame: %d x %d with %d:%d PAR\n",output_width,output_height,output_ar_n,output_ar_d);
@@ -772,6 +717,8 @@ int main(int argc,char **argv) {
 	}
 
 	{
+		AVDictionary *opt_dict = NULL;
+
 		output_avstream_video = avformat_new_stream(output_avfmt, NULL);
 		if (output_avstream_video == NULL) {
 			fprintf(stderr,"Unable to create output video stream\n");
@@ -790,20 +737,26 @@ int main(int argc,char **argv) {
 		output_avstream_video_codec_context->pix_fmt = use_422_colorspace ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV420P;
 		output_avstream_video_codec_context->gop_size = 15;
 		output_avstream_video_codec_context->max_b_frames = 0;
-		output_avstream_video_codec_context->bit_rate = 25000000;
+		output_avstream_video_codec_context->bit_rate = 50000000;
+		output_avstream_video_codec_context->qmin = 2;
 		output_avstream_video_codec_context->time_base = (AVRational){output_field_rate.den, output_field_rate.num};
+
+		av_dict_set(&opt_dict,"crf","1",0);
+		av_dict_set(&opt_dict,"crf_max","16",0);
 
 		output_avstream_video->time_base = output_avstream_video_codec_context->time_base;
 		if (output_avfmt->oformat->flags & AVFMT_GLOBALHEADER)
 			output_avstream_video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-		if (avcodec_open2(output_avstream_video_codec_context,avcodec_find_encoder(AV_CODEC_ID_H264),NULL) < 0) {
+		if (avcodec_open2(output_avstream_video_codec_context,avcodec_find_encoder(AV_CODEC_ID_H264),&opt_dict) < 0) {
 			fprintf(stderr,"Output stream cannot open codec\n");
 			return 1;
 		}
 
 		if (avcodec_parameters_from_context(output_avstream_video->codecpar,output_avstream_video_codec_context) < 0)
 			fprintf(stderr,"WARNING: parameters from context failed\n");
+
+		av_dict_free(&opt_dict);
 	}
 
 	if (!(output_avfmt->oformat->flags & AVFMT_NOFILE)) {
@@ -879,12 +832,8 @@ int main(int argc,char **argv) {
 
 		memset(output_avstream_video_frame->data[0],0x00,output_avstream_video_frame->linesize[0] * output_avstream_video_frame->height);
 
-		for (std::vector<InputFile>::iterator ifi=input_files.begin();ifi!=input_files.end();ifi++) {
+		{
 			signed long long current=0;
-
-			if (DIE) break;
-
-			InputFile &input_file = *ifi;
 
 			while (!input_file.eof && !DIE) {
 				if (!input_file.got_video)
@@ -907,6 +856,8 @@ int main(int argc,char **argv) {
 			}
 
 			while (!DIE) {
+				size_t cutoff = 0;
+
 				while (!input_file.eof && !DIE && input_file.video_frame_to_output_f() < (current + 30LL)) {
 					input_file.next_packet();
 
@@ -926,124 +877,27 @@ int main(int argc,char **argv) {
 					 current > (unsigned long long)ceil(input_file.video_frame_to_output_f())))
 					break;
 
-				/* cross-blending weights for this frame period */
-				std::vector< pair<size_t,double> > weights;
-				assert(frames.size() == frame_t.size());
-				size_t cutoff = 0;
+				for (size_t i=0;(i+1ul) < frames.size();i++) {
+					double bt = frame_t[i];
+					double et = frame_t[i+1];
 
-				/* scan for first frame to render */
-				if (frames.size() > 1) {
-					if (framealt > 1) {
-						for (size_t i=(size_t)((unsigned long long)current % (unsigned long long)framealt);(i+(size_t)framealt) < frames.size();i += (size_t)framealt) {
-							double bt = frame_t[i];
-							double et = frame_t[i+framealt];
-
-							if (i != 0) {
-								if ((et + 2.0) < current) {
-									cutoff = i - (i % framealt);
-								}
-							}
-
-							if (bt < current)
-								bt = current;
-							if (bt > (current + (fullframealt ? framealt : 1)))
-								bt = (current + (fullframealt ? framealt : 1));
-
-							if (et < current)
-								et = current;
-							if (et > (current + (fullframealt ? framealt : 1)))
-								et = (current + (fullframealt ? framealt : 1));
-
-							assert(bt <= et);
-
-							if (bt < et)
-								weights.push_back(pair<size_t,double>(i,(et-bt) / (fullframealt ? framealt : 1)));
-						}
-					}
-					else {
-						for (size_t i=0;(i+1ul) < frames.size();i++) {
-							double bt = frame_t[i];
-							double et = frame_t[i+1];
-
-							if (i != 0) {
-								if ((et + 2.0) < current) {
-									cutoff = i;
-								}
-							}
-
-							if (bt < current)
-								bt = current;
-							if (bt > (current + 1ll))
-								bt = (current + 1ll);
-
-							if (et < current)
-								et = current;
-							if (et > (current + 1ll))
-								et = (current + 1ll);
-
-							assert(bt <= et);
-
-							if (bt < et)
-								weights.push_back(pair<size_t,double>(i,et-bt));
+					if (i != 0) {
+						if ((et + 2.0) < current) {
+							cutoff = i;
 						}
 					}
 				}
-
-				if (weights.size() == 0 && frames.size() > cutoff)
-					weights.push_back(pair<size_t,double>(cutoff,1.0));
-
-				if (squelch_frameblend_near_match) {
-					if (weights.size() == 2 || weights.size() == 3) {
-						double sq = 1.0;
-
-						assert(weights[0].first < frame_t.size());
-						assert(weights[1].first < frame_t.size());
-
-						double bt = frame_t[weights[0].first];
-						double et = frame_t[weights[1].first];
-
-						sq = fabs((et - bt) - 1.0) / 0.01; /* start squelching if less than 1% difference between source & dest rate */
-						if (sq < 1.0) {
-							sq = pow(sq,2.0);
-
-							if (sq > 0.01) {
-								if (weights[0].second > sq) weights[0].second = sq;
-								weights[0].second /= sq;
-								weights[1].second = 1.0 - weights[0].second;
-							}
-							else {
-								weights[0].second = 1.0;
-								weights[1].second = 0.0;
-							}
-
-							if (weights.size() > 2)
-								weights[2].second = 0.0;
-						}
-					}
-				}
-
-				std::vector<unsigned int> weight16;
-
-				for (size_t i=0;i < weights.size();i++)
-					weight16.push_back((unsigned int)floor((weights[i].second * 0x10000)+0.5));
-
-				assert(weights.size() == weight16.size());
 
 				if (gamma_correction > 1) {
 					for (unsigned int y=0;y < output_height;y++) {
 						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
 						for (unsigned int x=0;x < output_width;x++) {
-							unsigned long long r = 0,g = 0,b = 0;
+							unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
+							unsigned long long r,g,b;
 
-							for (size_t wi=0;wi < weight16.size();wi++) {
-								size_t fi = weights[wi].first;
-								assert(fi < frames.size());
-								unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
-
-								b += gamma_dec16(inframe[0]) * (unsigned long long)weight16[wi];
-								g += gamma_dec16(inframe[1]) * (unsigned long long)weight16[wi];
-								r += gamma_dec16(inframe[2]) * (unsigned long long)weight16[wi];
-							}
+							b = gamma_dec16(inframe[0]) << 16ul;
+							g = gamma_dec16(inframe[1]) << 16ul;
+							r = gamma_dec16(inframe[2]) << 16ul;
 
 							outframe[0] = clamp255(gamma_enc16(b >> 16ull));
 							outframe[1] = clamp255(gamma_enc16(g >> 16ull));
@@ -1058,17 +912,12 @@ int main(int argc,char **argv) {
 					for (unsigned int y=0;y < output_height;y++) {
 						unsigned char *outframe = (unsigned char*)(output_avstream_video_frame->data[0] + (y * (output_avstream_video_frame->linesize[0])));
 						for (unsigned int x=0;x < output_width;x++) {
-							unsigned long r = 0,g = 0,b = 0;
+							unsigned char *inframe = ((unsigned char*)frames[0] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
+							unsigned long r,g,b;
 
-							for (size_t wi=0;wi < weight16.size();wi++) {
-								size_t fi = weights[wi].first;
-								assert(fi < frames.size());
-								unsigned char *inframe = ((unsigned char*)frames[fi] + (y * (input_file.input_avstream_video_frame_rgb->linesize[0]))) + (x * 4u);
-
-								b += inframe[0] * (unsigned long)weight16[wi];
-								g += inframe[1] * (unsigned long)weight16[wi];
-								r += inframe[2] * (unsigned long)weight16[wi];
-							}
+							b = inframe[0] << 16ul;
+							g = inframe[1] << 16ul;
+							r = inframe[2] << 16ul;
 
 							outframe[0] = clamp255(b >> 16ul);
 							outframe[1] = clamp255(g >> 16ul);
@@ -1104,7 +953,7 @@ int main(int argc,char **argv) {
 				output_frame(output_avstream_video_encode_frame,current);
 				current++;
 
-				if (cutoff >= 32) {
+				if (cutoff > 0) {
 					assert(frame_t.size() > cutoff);
 					assert(frames.size() > cutoff);
 
@@ -1168,8 +1017,7 @@ int main(int argc,char **argv) {
 	avformat_free_context(output_avfmt);
 
 	/* close all */
-	for (std::vector<InputFile>::iterator i=input_files.begin();i!=input_files.end();i++)
-		(*i).close_input();
+	input_file.close_input();
 
 	return 0;
 }
