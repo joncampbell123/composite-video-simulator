@@ -828,6 +828,8 @@ int main(int argc,char **argv) {
 	/* run all inputs and render to output, until done */
 	{
 		signed long long outbase=0;
+		long final_minv = -1,final_maxv = -1;
+		bool final_init = false;
 
 		memset(output_avstream_video_frame->data[0],0x00,output_avstream_video_frame->linesize[0] * output_avstream_video_frame->height);
 
@@ -963,12 +965,29 @@ int main(int argc,char **argv) {
 					maxv += dist / 25;
 				}
 
+				if (!final_init) {
+					final_init = true;
+					final_minv = minv;
+					final_maxv = maxv;
+				}
+				else {
+					if (final_maxv < maxv)
+						final_maxv = ((final_maxv*1l) + maxv) / 2l;
+					else
+						final_maxv = ((final_maxv*4l) + maxv) / 5l;
+
+					if (final_minv > minv)
+						final_minv = ((final_minv*1l) + minv) / 2l;
+					else
+						final_minv = ((final_minv*4l) + minv) / 5l;
+				}
+
 //				fprintf(stderr,"\nmin=%.15f max=%.15f gc=%lu\n",(double)minv/scaleto,(double)maxv/scaleto,scaleto);
 
 				for (unsigned int y=0;y < output_height;y++) {
 					long *longframe = lframe + (y * output_width * 3);
 					for (unsigned int x=0;x < output_width*3;x++) {
-						long long v = (((long long)(longframe[x] - minv)) * (long long)scaleto) / ((long long)(maxv - minv));
+						long long v = (((long long)(longframe[x] - final_minv)) * (long long)scaleto) / ((long long)(final_maxv - final_minv));
 						if (v < -0x7FFFFFFFl) v = -0x7FFFFFFFl;
 						if (v >  0x7FFFFFFFl) v =  0x7FFFFFFFl;
 						longframe[x] = (long)v;
